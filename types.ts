@@ -40,10 +40,30 @@ export interface Goal {
   color?: string;
 }
 
+export interface AccountSettings {
+  accountId: string; // Matches the account name (e.g., 'Nubank')
+  closingDay: number;
+  dueDay: number;
+}
+
+export interface Budget {
+  id: string;
+  category: string;
+  limit: number;
+}
+
+export interface UserProfile {
+  name: string;
+  hasCompletedOnboarding: boolean;
+}
+
 export interface AppData {
+  userProfile: UserProfile;
   transactions: Transaction[];
   subscriptions: Subscription[];
   goals: Goal[];
+  accountSettings: AccountSettings[];
+  budgets: Budget[];
 }
 
-export type ViewState = 'dashboard' | 'transactions' | 'calendar' | 'goals' | 'settings';
+export type ViewState = 'dashboard' | 'transactions' | 'calendar' | 'goals' | 'settings' | 'budgets';

@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, CreditCard, Calendar, Target, Settings, 
-  Eye, EyeOff, Download, Upload, Share2, Trash2, TrendingUp, Wallet, Filter, ChevronLeft, ChevronRight, Edit2, X, Plus, PiggyBank, FileText, Repeat, FileSpreadsheet, MessageCircle, PieChart as PieIcon, CreditCard as CardIcon, CheckSquare, Square
+  Eye, EyeOff, Download, Upload, Share2, Trash2, TrendingUp, Wallet, Filter, ChevronLeft, ChevronRight, Edit2, X, Plus, PiggyBank, FileText, Repeat, FileSpreadsheet, MessageCircle, PieChart as PieIcon, CreditCard as CardIcon, CheckSquare, Square, LogOut, Users, ArrowUpRight, ArrowDownRight, Activity, Scale
 } from 'lucide-react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useFinanceStore } from './hooks/useFinanceStore';
 import { SmartBar } from './components/SmartBar';
 import { TransactionModal } from './components/TransactionModal';
@@ -13,6 +14,7 @@ import { ForecastChart } from './components/ForecastChart';
 import { ExpenseChart } from './components/ExpenseChart';
 import { BudgetCard } from './components/BudgetCard';
 import { OnboardingWizard } from './components/OnboardingWizard';
+import { AuthScreens } from './components/AuthScreens';
 import { Transaction, ViewState } from './types';
 import { 
   formatCurrency, 
@@ -28,11 +30,13 @@ import {
   parseCurrencyToNumber 
 } from './utils';
 
-// --- Sub-components ---
+// --- Sub-components (Moved inside or kept external) ---
 
 const Sidebar = ({ view, setView }: { view: ViewState, setView: (v: ViewState) => void }) => {
+  const { logout } = useAuth();
+  
   const items: { id: ViewState, icon: any, label: string }[] = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
+    { id: 'dashboard', icon: LayoutDashboard, label: 'Resumo' },
     { id: 'transactions', icon: CreditCard, label: 'Extrato' },
     { id: 'calendar', icon: Calendar, label: 'Agenda' },
     { id: 'goals', icon: Target, label: 'Cofres' },
@@ -45,7 +49,7 @@ const Sidebar = ({ view, setView }: { view: ViewState, setView: (v: ViewState) =
         <div className="w-8 h-8 bg-gradient-to-br from-primary to-blue-600 rounded-lg"></div>
         <span className="hidden md:block">Zenith</span>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 flex-1">
         {items.map((item) => (
           <button
             key={item.id}
@@ -61,6 +65,14 @@ const Sidebar = ({ view, setView }: { view: ViewState, setView: (v: ViewState) =
           </button>
         ))}
       </div>
+      
+      <button 
+        onClick={logout}
+        className="w-full flex items-center gap-3 p-3 rounded-xl text-zinc-500 hover:bg-red-500/10 hover:text-red-400 transition-all mt-auto"
+      >
+        <LogOut className="w-5 h-5" />
+        <span className="hidden md:block">Sair</span>
+      </button>
     </nav>
   );
 };
@@ -75,17 +87,7 @@ const MobileNav = ({ view, setView }: { view: ViewState, setView: (v: ViewState)
   );
 };
 
-const StatCard = ({ title, value, trend, privacy }: { title: string, value: string, trend?: string, privacy: boolean }) => (
-  <div className="bg-surface p-6 rounded-2xl border border-zinc-800 hover:border-zinc-700 transition-colors">
-    <h3 className="text-zinc-400 text-sm font-medium mb-1">{title}</h3>
-    <div className="text-2xl font-bold text-white mb-2 tracking-tight">
-      {value}
-    </div>
-    {trend && <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400">{trend}</span>}
-  </div>
-);
-
-// Expanded Transaction Row to handle "Ghost" props (virtual transactions) and Display Overrides
+// Expanded Transaction Row (Same as before)
 const TransactionRow: React.FC<{ 
   t: Transaction, 
   privacy: boolean, 
@@ -100,9 +102,6 @@ const TransactionRow: React.FC<{
   onSelect?: (id: string) => void
 }> = ({ t, privacy, onDeleteClick, onEditClick, isGhost, ghostIndex, overrideAmount, isBillView, isSubscription, isSelected, onSelect }) => {
   
-  // If override provided (from bill view calculation), use it.
-  // Else if it's a ghost, calc installment.
-  // Else use total.
   let displayAmount = getEffectiveAmount(t);
   
   if (overrideAmount !== undefined) {
@@ -111,14 +110,12 @@ const TransactionRow: React.FC<{
     displayAmount = getInstallmentValue(t);
   }
 
-  // If it's the Main Row (not ghost) but we are in Bill View and it's an installment, show slice
   if (isBillView && !isGhost && t.isInstallment) {
       displayAmount = getInstallmentValue(t);
   }
 
   const currentInstallmentIdx = isGhost ? ghostIndex : (isBillView ? 1 : null);
 
-  // Determine styles for Ghost/Subscription
   let rowStyle = 'hover:bg-zinc-800/30 hover:border-zinc-800/50';
   if (isGhost) rowStyle = 'bg-zinc-900/50 border-dashed border-zinc-800 hover:border-zinc-700 opacity-80';
   if (isSubscription) rowStyle = 'bg-purple-500/5 border-dashed border-purple-500/20 hover:bg-purple-500/10';
@@ -243,24 +240,30 @@ const GoalDepositModal = ({ isOpen, onClose, goalName, onConfirm }: { isOpen: bo
   );
 }
 
-// Main Component
-export default function App() {
+// --- MAIN APPLICATION CONTENT ---
+// This is separated to use Hooks that are provided by AuthProvider wrapper
+function AppContent() {
+  const { currentUser, userProfile, logout } = useAuth();
   const [view, setView] = useState<ViewState>('dashboard');
+  
+  // Dashboard Date Navigation State
+  const [dashboardDate, setDashboardDate] = useState(new Date());
+
+  // Logic from existing App
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isImportWizardOpen, setIsImportWizardOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
-  // Selection State
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
-  // Import State
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
+  // Store now uses Firestore under the hood
   const { 
      data, addTransaction, editTransaction: updateTransaction, deleteTransaction, 
      addGoal, addFundsToGoal, updateAccountSettings, setBudget, deleteBudget,
@@ -277,70 +280,89 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [depositGoalId, setDepositGoalId] = useState<string | null>(null);
 
-  // --- STATS CALCULATION (Real Cash Flow / Bill View) ---
-  const stats = useMemo(() => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+  // AUTH CHECK
+  if (!currentUser) {
+     return <AuthScreens />;
+  }
+
+  // ONBOARDING CHECK
+  const hasSettings = data.accountSettings && data.accountSettings.length > 0;
+  if (!hasSettings) {
+      // User is logged in but family has no settings -> Force Onboarding
+      return <OnboardingWizard onComplete={completeOnboarding} />;
+  }
+
+  // --- REVISED STATS CALCULATION FOR DASHBOARD (Organizze Style) ---
+  const dashboardStats = useMemo(() => {
+    const targetMonth = dashboardDate.getMonth();
+    const targetYear = dashboardDate.getFullYear();
 
     let income = 0;
-    let expense = 0;
+    let cashExpenses = 0; // Debit, Pix, Cash
+    let creditCardBill = 0; // Credit Card invoices due this month
 
     data.transactions.forEach(t => {
-      // Logic: Does this transaction actually impact *this month's* finances?
-      // For Debit/Pix: Transaction Date Month == Current Month
-      // For Credit: Estimated Payment Date Month == Current Month
-
       const amount = getEffectiveAmount(t);
-      
-      // FALLBACK SETTINGS: If user hasn't configured, assume Closing Day 1 / Due Day 10.
-      // This ensures previous month transactions (date > 1) are pushed to current month.
+      const isCredit = t.paymentMethod === 'Crédito';
       const foundSettings = data.accountSettings.find(s => s.accountId === t.account);
-      const settings = foundSettings || (t.paymentMethod === 'Crédito' ? { accountId: t.account, closingDay: 1, dueDay: 10 } : undefined);
+      const settings = foundSettings || (isCredit ? { accountId: t.account, closingDay: 1, dueDay: 10 } : undefined);
 
       if (t.type === 'income') {
-        // Income is usually immediate (Date-based)
         const tDate = new Date(t.date);
-        if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) {
+        if (tDate.getMonth() === targetMonth && tDate.getFullYear() === targetYear) {
            income += amount;
         }
       } else {
-        // Expense Logic
+        // EXPENSE LOGIC
         if (t.isInstallment && t.installmentsTotal) {
-           // Iterate all installments to see if ONE of them falls in this month
            const installmentValue = getInstallmentValue(t);
            const tDate = new Date(t.date);
            
            for (let i = 0; i < t.installmentsTotal; i++) {
-              // Nominal date of installment
               const nominalDate = new Date(tDate);
               nominalDate.setMonth(tDate.getMonth() + i);
               
-              // Effective Payment Date (taking Closing Day into account)
-              const payDate = getEstimatedPaymentDate(nominalDate.toISOString(), t.paymentMethod === 'Crédito' ? settings : undefined);
+              const payDate = getEstimatedPaymentDate(nominalDate.toISOString(), isCredit ? settings : undefined);
 
-              if (payDate.getMonth() === currentMonth && payDate.getFullYear() === currentYear) {
-                 expense += installmentValue;
+              // Check if THIS specific installment falls in the selected Dashboard Month
+              if (payDate.getMonth() === targetMonth && payDate.getFullYear() === targetYear) {
+                 if (isCredit) {
+                    creditCardBill += installmentValue;
+                 } else {
+                    cashExpenses += installmentValue;
+                 }
               }
            }
         } else {
-           // Single Expense
-           // If Debit/Pix -> Use transaction date
-           // If Credit -> Use Payment Date (Billing Cycle)
-           const isCredit = t.paymentMethod === 'Crédito' || (!t.paymentMethod && t.account !== 'Carteira'); // Default assumption
+           // Single Transaction
            const payDate = getEstimatedPaymentDate(t.date, isCredit ? settings : undefined);
 
-           if (payDate.getMonth() === currentMonth && payDate.getFullYear() === currentYear) {
-              expense += amount;
+           if (payDate.getMonth() === targetMonth && payDate.getFullYear() === targetYear) {
+              if (isCredit) {
+                 creditCardBill += amount;
+              } else {
+                 cashExpenses += amount;
+              }
            }
         }
       }
     });
 
-    return { income, expense, balance: income - expense };
-  }, [data.transactions, data.accountSettings]);
+    // Balanço Final = (Receitas - GastosConta) - FaturaCartao
+    // Mas visualmente, Card 1 é Saldo (Rec - GastosConta), Card 2 é Fatura.
+    const monthBalance = income - cashExpenses; 
+    const finalBalance = monthBalance - creditCardBill;
 
-  // --- FILTERED LIST CALCULATION (Smart Bill View) ---
+    return { 
+      income, 
+      cashExpenses, 
+      creditCardBill, 
+      monthBalance,
+      finalBalance
+    };
+  }, [data.transactions, data.accountSettings, dashboardDate]);
+
+  // --- FILTERED LIST CALCULATION ---
   const { displayItems, isBillViewMode } = useMemo(() => {
     const isFilteringDate = !!(filterStart || filterEnd);
     
@@ -414,10 +436,8 @@ export default function App() {
   }, [data.transactions, filterStart, filterEnd, filterCategory, filterAccount, sortOrder]);
 
 
-  // --- EXPORT/IMPORT FUNCTIONS ---
-
+  // --- EXPORT/IMPORT HANDLERS ---
   const handleExportCSV = () => {
-    // ... existing export code ...
     const headers = ['Data', 'Descricao', 'Categoria', 'Conta', 'Tipo', 'Valor', 'Observacao'];
     const rows = displayItems.map(item => {
       const val = item.overrideAmount || getEffectiveAmount(item.t);
@@ -439,7 +459,6 @@ export default function App() {
   };
 
   const handleWhatsAppReport = () => {
-     // ... existing whatsapp code ...
     let totalIncome = 0;
     let totalExpense = 0;
     const incomeList: string[] = [];
@@ -467,30 +486,16 @@ export default function App() {
     const period = filterStart && filterEnd ? `${new Date(filterStart).toLocaleDateString()} a ${new Date(filterEnd).toLocaleDateString()}` : 'Geral/Todo Período';
 
     const text = `*Relatório Financeiro - Zenith* 🚀\nPeríodo: ${period}\n\n*RESUMO:*\n✅ Total Entradas: R$ ${summaryIncome.toFixed(2)}\n🔻 A Pagar (Saídas): R$ ${summaryExpense.toFixed(2)}\n💰 *Saldo:* R$ ${balance.toFixed(2)}\n\n━━━━━━━━━━━━━━━━\n\n*🟢 ENTRADAS:*\n${incomeList.length > 0 ? incomeList.join('\n') : '(Nenhuma entrada)'}\n\n*🔴 SAÍDAS:*\n${expenseList.length > 0 ? expenseList.join('\n') : '(Nenhuma despesa)'}\n\n${displayItems.length > MAX_ITEMS ? `... e mais ${displayItems.length - MAX_ITEMS} itens.` : ''}`.trim();
-    const url = `https://wa.me/5516997849212?text=${encodeURIComponent(text)}`;
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        importData(event.target.result as string);
-      }
-    };
-    reader.readAsText(file);
-  };
-  
-  // New: Handle Import File Selection from Header
   const handleImportFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setPendingImportFile(file);
       setIsImportWizardOpen(true);
     }
-    // Reset input so the same file can be selected again if needed
     if (e.target) e.target.value = '';
   };
 
@@ -521,7 +526,7 @@ export default function App() {
 
   const handleFinishImport = (transactions: Omit<Transaction, 'id'>[]) => {
       transactions.forEach(t => addTransaction(t));
-      alert(`${transactions.length} transações importadas com sucesso!`);
+      // In Firestore mode, this might be slow if individual, but addTransaction in hook handles it.
   };
 
   const confirmDelete = () => {
@@ -535,7 +540,6 @@ export default function App() {
     }
   };
 
-  // Selection Logic
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => {
       const newSet = new Set(prev);
@@ -546,11 +550,7 @@ export default function App() {
   };
 
   const selectAll = () => {
-    // Only select actual transactions, not ghosts
-    const actualIds = displayItems
-      .filter(item => !item.isGhost)
-      .map(item => item.t.id);
-      
+    const actualIds = displayItems.filter(item => !item.isGhost).map(item => item.t.id);
     if (selectedIds.size === actualIds.length) {
       setSelectedIds(new Set());
     } else {
@@ -558,7 +558,7 @@ export default function App() {
     }
   };
 
-  // --- CALENDAR HELPERS (Unchanged logic) ---
+  // Calendar Logic
   const calendarDays = useMemo(() => {
     const year = calendarDate.getFullYear();
     const month = calendarDate.getMonth();
@@ -572,23 +572,33 @@ export default function App() {
     return days;
   }, [calendarDate]);
 
+  // Helper to check filters (Shared between Calendar dots and Selected Day list)
+  const checkFilters = (t: Transaction) => {
+    if (filterCategory !== 'Todas' && t.category !== filterCategory) return false;
+    if (filterAccount !== 'Todos' && t.account !== filterAccount) return false;
+    return true;
+  };
+
   const getTransactionsForDate = (year: number, month: number, day: number) => {
     const targetDate = new Date(year, month, day);
-    const realTransactions: Transaction[] = [];
-    const ghostTransactions: {t: Transaction, index: number}[] = [];
-    const subscriptionTransactions: Transaction[] = [];
+    let realTransactions: {t: Transaction, sortVal: number}[] = [];
+    let ghostTransactions: {t: Transaction, index: number, sortVal: number}[] = [];
+    let subscriptionTransactions: {t: Transaction, sortVal: number}[] = [];
 
     data.transactions.forEach(t => {
+      // Check Filters First
+      if (!checkFilters(t)) return;
+
       const tDate = new Date(t.date);
       const isCreationDay = tDate.getDate() === day && tDate.getMonth() === month && tDate.getFullYear() === year;
 
       if (isCreationDay) {
-        realTransactions.push(t);
+        realTransactions.push({ t, sortVal: getEffectiveAmount(t) });
       } else {
         if (t.isInstallment && tDate.getDate() === day) {
            const idx = getActiveInstallmentIndex(t, targetDate);
            if (idx !== null && idx > 1) { 
-              ghostTransactions.push({ t, index: idx });
+              ghostTransactions.push({ t, index: idx, sortVal: getInstallmentValue(t) });
            }
         }
       }
@@ -598,7 +608,13 @@ export default function App() {
     data.subscriptions.forEach(sub => {
        const effectiveDueDay = Math.min(sub.dueDay, daysInCurrentMonth);
        if (effectiveDueDay === day) {
-          subscriptionTransactions.push({
+          // Virtual transaction for subscription check, need to pass filters too?
+          // Since subscriptions don't have all metadata in this list, we might miss category/account
+          // But usually subscriptions are auto-generated.
+          // For now, let's assume they are "Assinaturas" and "Recorrente" or allow all.
+          // If we want strict filtering, we need to map subscription to a transaction-like object first.
+          
+          const mockSubT: Transaction = {
             id: `sub-${sub.id}-${year}-${month}`,
             amount: sub.value,
             origin: sub.name,
@@ -610,24 +626,39 @@ export default function App() {
             tags: ['Assinatura'],
             isInstallment: false,
             isShared: false
-          });
+          };
+
+          if (checkFilters(mockSubT)) {
+             subscriptionTransactions.push({ t: mockSubT, sortVal: sub.value });
+          }
        }
     });
-    return { real: realTransactions, ghost: ghostTransactions, subs: subscriptionTransactions };
-  };
 
-  // --- RENDER ---
-  // If onboarding is not complete, show only the wizard
-  if (!data.userProfile?.hasCompletedOnboarding) {
-      return <OnboardingWizard onComplete={completeOnboarding} />;
-  }
+    // Sort Logic applied here for the detailed list
+    const sortFn = (a: any, b: any) => {
+        if (sortOrder === 'highest') return b.sortVal - a.sortVal;
+        if (sortOrder === 'lowest') return a.sortVal - b.sortVal;
+        // Default desc/asc usually based on Time, but here they all have same date (day).
+        // So fallback to creation order (reverse ID or array order)
+        return 0; 
+    };
+
+    realTransactions.sort(sortFn);
+    ghostTransactions.sort(sortFn);
+    subscriptionTransactions.sort(sortFn);
+
+    return { 
+        real: realTransactions.map(x => x.t), 
+        ghost: ghostTransactions.map(x => ({t: x.t, index: x.index})), 
+        subs: subscriptionTransactions.map(x => x.t) 
+    };
+  };
 
   return (
     <div className="min-h-screen bg-background text-zinc-100 font-sans selection:bg-primary/30">
       <Sidebar view={view} setView={setView} />
       <MobileNav view={view} setView={setView} />
       
-      {/* Transaction Modal (Add/Edit) */}
       <TransactionModal 
         isOpen={isModalOpen} 
         onClose={() => {
@@ -638,14 +669,12 @@ export default function App() {
         initialData={editingTransaction}
       />
 
-      {/* Goal Modal */}
       <GoalModal 
         isOpen={isGoalModalOpen}
         onClose={() => setIsGoalModalOpen(false)}
         onSave={addGoal}
       />
       
-      {/* Account Settings Modal */}
       <AccountSettingsModal 
          isOpen={isAccountModalOpen}
          onClose={() => setIsAccountModalOpen(false)}
@@ -653,18 +682,16 @@ export default function App() {
          onSave={updateAccountSettings}
       />
 
-      {/* Import Wizard */}
       <ImportWizard 
          isOpen={isImportWizardOpen}
          onClose={() => {
            setIsImportWizardOpen(false);
-           setPendingImportFile(null); // Clear file on close
+           setPendingImportFile(null); 
          }}
          onFinishImport={handleFinishImport}
          pendingFile={pendingImportFile}
       />
       
-      {/* Hidden File Input for Header Button */}
       <input 
         type="file" 
         ref={importFileInputRef}
@@ -673,7 +700,6 @@ export default function App() {
         onChange={handleImportFileSelect}
       />
 
-      {/* Goal Deposit Modal */}
       <GoalDepositModal 
         isOpen={!!depositGoalId}
         onClose={() => setDepositGoalId(null)}
@@ -686,7 +712,6 @@ export default function App() {
         }}
       />
 
-      {/* Delete Confirmation */}
       <ConfirmDeleteModal 
         isOpen={!!deleteId || showBulkDeleteConfirm} 
         onClose={() => { setDeleteId(null); setShowBulkDeleteConfirm(false); }} 
@@ -700,11 +725,12 @@ export default function App() {
         {/* Header */}
         <header className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-2xl font-bold">Bom dia, {data.userProfile.name}</h1>
-            <p className="text-zinc-500 text-sm">Controle financeiro total.</p>
+            <h1 className="text-2xl font-bold">Bom dia, {userProfile?.name}</h1>
+            <p className="text-zinc-500 text-sm flex items-center gap-1">
+               <Users className="w-3 h-3" /> Família de {userProfile?.name}
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* New Import Button - High Visibility */}
             <button 
               onClick={() => importFileInputRef.current?.click()}
               className="flex items-center gap-2 px-4 py-2 bg-surfaceHighlight hover:bg-zinc-700 border border-zinc-700/50 rounded-full text-zinc-200 transition-all hover:scale-105 active:scale-95 group"
@@ -723,16 +749,11 @@ export default function App() {
                 <Settings className="w-5 h-5" />
               </button>
               
-              {/* Dropdown with bridge to fix hover issue */}
               <div className="absolute right-0 top-full pt-2 w-56 hidden group-hover:block z-50">
                   <div className="bg-surface border border-zinc-800 rounded-xl shadow-xl p-2">
                      <button onClick={() => setIsAccountModalOpen(true)} className="w-full text-left px-4 py-2 hover:bg-zinc-800 rounded-lg text-sm flex gap-2"><CardIcon className="w-4 h-4"/> Config. Cartões</button>
                      <div className="h-px bg-zinc-800 my-1"></div>
                      <button onClick={handleDownload} className="w-full text-left px-4 py-2 hover:bg-zinc-800 rounded-lg text-sm flex gap-2"><Download className="w-4 h-4"/> Backup JSON</button>
-                     <label className="w-full text-left px-4 py-2 hover:bg-zinc-800 rounded-lg text-sm flex gap-2 cursor-pointer">
-                        <Upload className="w-4 h-4"/> Restaurar Backup
-                        <input type="file" className="hidden" onChange={handleFileUpload} accept=".json" />
-                     </label>
                   </div>
               </div>
 
@@ -740,7 +761,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* Smart Command Bar */}
         <SmartBar 
           onAdd={addTransaction} 
           onOpenManual={() => {
@@ -750,20 +770,126 @@ export default function App() {
           history={data.transactions} 
         />
 
-        {/* DASHBOARD */}
+        {/* --- VIEW SWITCHER --- */}
         {view === 'dashboard' && (
           <div className="space-y-6 animate-in slide-in-from-bottom-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <StatCard title="Saldo Previsto (Mês)" value={formatCurrency(stats.balance, privacyMode)} privacy={privacyMode} />
-              <StatCard title="Receitas (Mês)" value={formatCurrency(stats.income, privacyMode)} trend="" privacy={privacyMode} />
-              <StatCard title="Fatura / Gastos (Mês)" value={formatCurrency(stats.expense, privacyMode)} trend="" privacy={privacyMode} />
+            
+            {/* 1. Date Navigation */}
+            <div className="flex items-center justify-between bg-surface p-4 rounded-2xl border border-zinc-800">
+              <button 
+                onClick={() => setDashboardDate(new Date(dashboardDate.setMonth(dashboardDate.getMonth() - 1)))}
+                className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white"
+              >
+                 <ChevronLeft className="w-5 h-5" />
+              </button>
+              <h2 className="text-lg font-bold capitalize text-white">
+                 {dashboardDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}
+              </h2>
+              <button 
+                onClick={() => setDashboardDate(new Date(dashboardDate.setMonth(dashboardDate.getMonth() + 1)))}
+                className="p-2 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white"
+              >
+                 <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* 2. Main Executive Cards (Organizze Style) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+               
+               {/* Card 1: Saldo do Mês (Caixa) */}
+               <div className="bg-surface p-6 rounded-3xl border border-zinc-800 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                     <Wallet className="w-24 h-24 text-emerald-500" />
+                  </div>
+                  <h3 className="text-zinc-400 text-sm font-medium mb-4 flex items-center gap-2">
+                     <Activity className="w-4 h-4" /> Saldo do Mês
+                  </h3>
+                  
+                  <div className="mb-4">
+                     <p className="text-xs text-zinc-500 mb-1">Receitas - Gastos (Débito/Pix)</p>
+                     <p className="text-3xl font-bold text-white tracking-tight">
+                        {formatCurrency(dashboardStats.monthBalance, privacyMode)}
+                     </p>
+                  </div>
+
+                  <div className="space-y-4 relative z-10">
+                     <div>
+                        <div className="flex justify-between text-xs mb-1">
+                           <span className="text-zinc-400">Receitas</span>
+                           <span className="text-emerald-400">{formatCurrency(dashboardStats.income, privacyMode)}</span>
+                        </div>
+                        <div className="w-full bg-zinc-900 rounded-full h-1.5">
+                           <div className="bg-emerald-500 h-1.5 rounded-full" style={{width: '100%'}}></div>
+                        </div>
+                     </div>
+                     <div>
+                        <div className="flex justify-between text-xs mb-1">
+                           <span className="text-zinc-400">Débitos</span>
+                           <span className="text-zinc-200">{formatCurrency(dashboardStats.cashExpenses, privacyMode)}</span>
+                        </div>
+                        <div className="w-full bg-zinc-900 rounded-full h-1.5">
+                           <div className="bg-zinc-500 h-1.5 rounded-full" style={{width: `${Math.min((dashboardStats.cashExpenses / (dashboardStats.income || 1)) * 100, 100)}%`}}></div>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+
+               {/* Card 2: Fatura Aberta */}
+               <div className="bg-gradient-to-br from-zinc-900 to-black p-6 rounded-3xl border border-zinc-800 relative overflow-hidden shadow-xl">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
+                  
+                  <h3 className="text-zinc-400 text-sm font-medium mb-2 flex items-center gap-2">
+                     <CreditCard className="w-4 h-4 text-primary" /> Fatura Aberta
+                  </h3>
+
+                  <div className="mt-4">
+                     <p className="text-xs text-zinc-500 mb-1">Vence em {dashboardDate.toLocaleString('pt-BR', { month: 'long' })}</p>
+                     <p className="text-3xl font-bold text-white tracking-tight">
+                        {formatCurrency(dashboardStats.creditCardBill, privacyMode)}
+                     </p>
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t border-zinc-800/50 flex items-center gap-2">
+                      <div className="bg-zinc-800 p-2 rounded-lg">
+                         <Calendar className="w-4 h-4 text-zinc-400" />
+                      </div>
+                      <p className="text-xs text-zinc-500 leading-tight">
+                         Total de gastos no cartão previstos para pagar neste mês.
+                      </p>
+                  </div>
+               </div>
+
+               {/* Card 3: Balanço Final */}
+               <div className="bg-surface p-6 rounded-3xl border border-zinc-800 relative">
+                  <div className="absolute top-0 right-0 p-4 opacity-5">
+                     <Scale className="w-24 h-24 text-white" />
+                  </div>
+                  <h3 className="text-zinc-400 text-sm font-medium mb-1">Balanço Final</h3>
+                  <p className="text-xs text-zinc-500 mb-6">Saldo do Mês - Fatura Aberta</p>
+                  
+                  <div className="text-4xl font-bold text-white tracking-tight mb-2">
+                     {formatCurrency(dashboardStats.finalBalance, privacyMode)}
+                  </div>
+
+                  {dashboardStats.finalBalance > 0 ? (
+                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+                        <ArrowUpRight className="w-3 h-3" /> No Azul
+                     </div>
+                  ) : (
+                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/10 text-red-400 text-xs font-medium border border-red-500/20">
+                        <ArrowDownRight className="w-3 h-3" /> Atenção
+                     </div>
+                  )}
+               </div>
+
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                <div className="lg:col-span-2 space-y-6">
+                  {/* Recent Transactions List */}
                   <div className="bg-surface rounded-2xl border border-zinc-800 overflow-hidden">
                      <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
-                       <h3 className="font-semibold">Últimas Movimentações (Criação)</h3>
+                       <h3 className="font-semibold">Últimas Movimentações (Geral)</h3>
                        <button onClick={() => setView('transactions')} className="text-xs text-primary hover:underline">Ver tudo</button>
                      </div>
                      <div>
@@ -783,24 +909,21 @@ export default function App() {
                     <ForecastChart 
                       transactions={data.transactions} 
                       subscriptions={data.subscriptions} 
-                      currentBalance={stats.balance} 
+                      currentBalance={dashboardStats.finalBalance} 
                       accountSettings={data.accountSettings}
                     />
                   </div>
                </div>
 
                <div className="lg:col-span-1 space-y-6">
-                  {/* Expense Distribution */}
                   <ExpenseChart transactions={data.transactions} privacy={privacyMode} />
                   
-                  {/* Mini Budget Overview */}
                   <div className="bg-surface p-4 rounded-2xl border border-zinc-800">
                      <div className="flex justify-between items-center mb-4">
                         <h3 className="font-semibold">Orçamentos</h3>
                         <button onClick={() => setView('budgets')} className="text-xs text-primary">Ver todos</button>
                      </div>
                      {data.budgets.slice(0, 3).map(b => {
-                        // Calculate spent for this budget this month
                         const spent = data.transactions.reduce((acc, t) => {
                            if(t.type === 'expense' && t.category === b.category && new Date(t.date).getMonth() === new Date().getMonth()) {
                               return acc + getEffectiveAmount(t);
@@ -816,10 +939,8 @@ export default function App() {
           </div>
         )}
 
-        {/* TRANSACTIONS (EXTRATO) */}
         {view === 'transactions' && (
           <div className="space-y-4 animate-in slide-in-from-bottom-4 relative">
-            {/* Same as before... */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
                 Histórico & Faturas
@@ -895,7 +1016,6 @@ export default function App() {
               {displayItems.length === 0 && <div className="p-8 text-center text-zinc-500">Nada encontrado com esses filtros.</div>}
             </div>
 
-            {/* Bulk Actions Floating Bar */}
             {selectedIds.size > 0 && (
                <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-surfaceHighlight border border-zinc-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 animate-in slide-in-from-bottom-10 fade-in">
                   <span className="text-sm font-medium text-white">{selectedIds.size} selecionados</span>
@@ -917,48 +1037,68 @@ export default function App() {
           </div>
         )}
 
-        {/* CALENDAR */}
         {view === 'calendar' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4">
-             {/* Same as before... */}
-             <div className="lg:col-span-1 bg-surface rounded-2xl border border-zinc-800 p-4 h-fit sticky top-4">
-                <div className="flex justify-between items-center mb-6">
-                   <h2 className="text-lg font-bold capitalize">
-                     {calendarDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}
-                   </h2>
-                   <div className="flex gap-2">
-                     <button onClick={() => setCalendarDate(new Date(calendarDate.setMonth(calendarDate.getMonth() - 1)))} className="p-2 hover:bg-zinc-800 rounded-lg"><ChevronLeft className="w-5 h-5"/></button>
-                     <button onClick={() => setCalendarDate(new Date(calendarDate.setMonth(calendarDate.getMonth() + 1)))} className="p-2 hover:bg-zinc-800 rounded-lg"><ChevronRight className="w-5 h-5"/></button>
+             <div className="lg:col-span-1 space-y-4 h-fit sticky top-4">
+                
+                {/* Calendar Filter Toolbar */}
+                <div className="bg-surface rounded-2xl border border-zinc-800 p-4">
+                   <div className="flex gap-2 mb-2 overflow-x-auto custom-scrollbar pb-2">
+                      <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white min-w-[100px]">
+                        <option value="Todas">Categ: Todas</option>
+                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <select value={filterAccount} onChange={e => setFilterAccount(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white min-w-[100px]">
+                        <option value="Todos">Conta: Todas</option>
+                        {ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+                      </select>
+                      <select value={sortOrder} onChange={e => setSortOrder(e.target.value as any)} className="bg-zinc-900 border border-zinc-700 rounded-lg p-2 text-xs text-white min-w-[100px]">
+                        <option value="desc">Recentes</option>
+                        <option value="highest">Maior Valor</option>
+                        <option value="lowest">Menor Valor</option>
+                      </select>
                    </div>
                 </div>
 
-                <div className="grid grid-cols-7 gap-2 text-center mb-2">
-                  {['D','S','T','Q','Q','S','S'].map(d => <span key={d} className="text-zinc-500 text-xs font-bold">{d}</span>)}
-                </div>
-                <div className="grid grid-cols-7 gap-2">
-                  {calendarDays.map((day, idx) => {
-                    if (!day) return <div key={idx} className="aspect-square"></div>;
-                    const { real, ghost, subs } = getTransactionsForDate(calendarDate.getFullYear(), calendarDate.getMonth(), day);
-                    const hasExpense = real.some(t => t.type === 'expense') || ghost.length > 0;
-                    const hasIncome = real.some(t => t.type === 'income');
-                    const hasSub = subs.length > 0;
-                    const isSelected = selectedDay === day;
+                <div className="bg-surface rounded-2xl border border-zinc-800 p-4">
+                    <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-lg font-bold capitalize">
+                        {calendarDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}
+                      </h2>
+                      <div className="flex gap-2">
+                        <button onClick={() => setCalendarDate(new Date(calendarDate.setMonth(calendarDate.getMonth() - 1)))} className="p-2 hover:bg-zinc-800 rounded-lg"><ChevronLeft className="w-5 h-5"/></button>
+                        <button onClick={() => setCalendarDate(new Date(calendarDate.setMonth(calendarDate.getMonth() + 1)))} className="p-2 hover:bg-zinc-800 rounded-lg"><ChevronRight className="w-5 h-5"/></button>
+                      </div>
+                    </div>
 
-                    return (
-                      <button 
-                        key={idx} 
-                        onClick={() => setSelectedDay(day)}
-                        className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all border ${isSelected ? 'bg-primary/20 border-primary text-white' : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-800 text-zinc-300'}`}
-                      >
-                        <span className="text-sm font-medium">{day}</span>
-                        <div className="flex gap-1 mt-1 h-2">
-                          {hasExpense && <div className="w-1.5 h-1.5 rounded-full bg-danger"></div>}
-                          {hasIncome && <div className="w-1.5 h-1.5 rounded-full bg-secondary"></div>}
-                          {hasSub && <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>}
-                        </div>
-                      </button>
-                    )
-                  })}
+                    <div className="grid grid-cols-7 gap-2 text-center mb-2">
+                      {['D','S','T','Q','Q','S','S'].map(d => <span key={d} className="text-zinc-500 text-xs font-bold">{d}</span>)}
+                    </div>
+                    <div className="grid grid-cols-7 gap-2">
+                      {calendarDays.map((day, idx) => {
+                        if (!day) return <div key={idx} className="aspect-square"></div>;
+                        const { real, ghost, subs } = getTransactionsForDate(calendarDate.getFullYear(), calendarDate.getMonth(), day);
+                        const hasExpense = real.some(t => t.type === 'expense') || ghost.length > 0;
+                        const hasIncome = real.some(t => t.type === 'income');
+                        const hasSub = subs.length > 0;
+                        const isSelected = selectedDay === day;
+
+                        return (
+                          <button 
+                            key={idx} 
+                            onClick={() => setSelectedDay(day)}
+                            className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all border ${isSelected ? 'bg-primary/20 border-primary text-white' : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-800 text-zinc-300'}`}
+                          >
+                            <span className="text-sm font-medium">{day}</span>
+                            <div className="flex gap-1 mt-1 h-2">
+                              {hasExpense && <div className="w-1.5 h-1.5 rounded-full bg-danger"></div>}
+                              {hasIncome && <div className="w-1.5 h-1.5 rounded-full bg-secondary"></div>}
+                              {hasSub && <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                 </div>
              </div>
 
@@ -966,13 +1106,18 @@ export default function App() {
                {selectedDay ? (
                  <div className="bg-surface rounded-2xl border border-zinc-800 overflow-hidden animate-in fade-in">
                     <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
-                      <h3 className="font-semibold">Dia {selectedDay} de {calendarDate.toLocaleString('pt-BR', { month: 'long' })}</h3>
+                      <div>
+                         <h3 className="font-semibold">Dia {selectedDay} de {calendarDate.toLocaleString('pt-BR', { month: 'long' })}</h3>
+                         <p className="text-xs text-zinc-500">
+                            Filtros: {filterCategory !== 'Todas' ? filterCategory : 'Todas Categ.'} • {filterAccount !== 'Todos' ? filterAccount : 'Todas Contas'}
+                         </p>
+                      </div>
                       <button onClick={() => setSelectedDay(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5"/></button>
                     </div>
                     <div className="divide-y divide-zinc-800/50">
                        {(() => {
                           const { real, ghost, subs } = getTransactionsForDate(calendarDate.getFullYear(), calendarDate.getMonth(), selectedDay);
-                          if (real.length === 0 && ghost.length === 0 && subs.length === 0) return <div className="p-8 text-center text-zinc-500">Nada registrado.</div>;
+                          if (real.length === 0 && ghost.length === 0 && subs.length === 0) return <div className="p-8 text-center text-zinc-500">Nada registrado neste dia (com os filtros atuais).</div>;
                           return (
                             <>
                               {real.map(t => <TransactionRow key={t.id} t={t} privacy={privacyMode} onDeleteClick={setDeleteId} onEditClick={openEditModal} isBillView={true} />)}
@@ -995,7 +1140,6 @@ export default function App() {
           </div>
         )}
 
-        {/* GOALS */}
         {view === 'goals' && (
           <div className="animate-in slide-in-from-bottom-4">
              {/* Same as before... */}
@@ -1037,14 +1181,12 @@ export default function App() {
           </div>
         )}
 
-        {/* BUDGETS (New View) */}
         {view === 'budgets' && (
           <div className="animate-in slide-in-from-bottom-4">
              <div className="flex justify-between items-center mb-6">
                <h2 className="text-xl font-bold">Orçamentos Mensais</h2>
                <div className="flex gap-2">
                  <button onClick={() => {
-                   // Simple prompt for now, could be a Modal later
                    const cat = prompt("Categoria (Ex: Alimentação):");
                    if(cat) {
                      const limit = prompt("Limite Mensal (R$):");
@@ -1058,12 +1200,8 @@ export default function App() {
 
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {data.budgets.map(b => {
-                   // Calculate spent
                    const spent = data.transactions.reduce((acc, t) => {
-                      // Filter by Category, Expense, and Current Month
-                      const tDate = new Date(t.date);
-                      const now = new Date();
-                      if(t.type === 'expense' && t.category === b.category && tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear()) {
+                      if(t.type === 'expense' && t.category === b.category && new Date(t.date).getMonth() === new Date().getMonth()) {
                          return acc + getEffectiveAmount(t);
                       }
                       return acc;
@@ -1095,5 +1233,14 @@ export default function App() {
 
       </main>
     </div>
+  );
+}
+
+// Wrapper to provide Context
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

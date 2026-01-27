@@ -167,9 +167,14 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
     if (!origin) origin = detectedType === 'income' ? 'Receita' : 'Nova Transação';
     origin = capitalizeFirstLetter(origin);
 
-    // 8. CATEGORY INFERENCE (Using Shared Utility)
+    // 8. CATEGORY INFERENCE (Using Shared Utility + History)
     let category = 'Outros';
-    const lastSimilar = history.find(t => t.origin.toLowerCase().includes(origin.toLowerCase()));
+    
+    // Bidirectional Check: "Uber" matches "Uber Viagem" AND "Uber Viagem" matches "Uber"
+    const lastSimilar = history.find(t => 
+      t.origin.toLowerCase().includes(origin.toLowerCase()) || 
+      origin.toLowerCase().includes(t.origin.toLowerCase())
+    );
     
     if (lastSimilar) {
       category = lastSimilar.category;

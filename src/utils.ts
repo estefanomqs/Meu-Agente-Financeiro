@@ -14,57 +14,90 @@ export const CATEGORY_KEYWORDS: Record<string, string> = {
   'restaurante': 'Alimentação', 'ifood': 'Alimentação', 'sushi': 'Alimentação', 'açaí': 'Alimentação',
   'padaria': 'Alimentação', 'cafe': 'Alimentação', 'café': 'Alimentação', 'almoço': 'Alimentação',
   'jantar': 'Alimentação', 'fome': 'Alimentação', 'mcdonalds': 'Alimentação', 'bk': 'Alimentação',
-  
+  'sorvete': 'Alimentação', 'doce': 'Alimentação', 'bolo': 'Alimentação', 'chocolate': 'Alimentação',
+  'esfiha': 'Alimentação', 'pastel': 'Alimentação', 'churrasco': 'Alimentação', 'bar': 'Alimentação',
+  'boteco': 'Alimentação', 'cerveja': 'Alimentação', 'bebida': 'Alimentação', 'rest': 'Alimentação',
+
   // Mercado
   'mercado': 'Mercado', 'supermercado': 'Mercado', 'compra do mês': 'Mercado', 
   'carrefour': 'Mercado', 'extra': 'Mercado', 'savegnago': 'Mercado', 'atacado': 'Mercado',
-  'assai': 'Mercado', 'tenda': 'Mercado',
-  
+  'assai': 'Mercado', 'tenda': 'Mercado', 'dia': 'Mercado', 'pão de açúcar': 'Mercado',
+  'shibata': 'Mercado', 'nagumo': 'Mercado', 'atacadão': 'Mercado', 'varejão': 'Mercado',
+  'hortifruti': 'Mercado', 'feira': 'Mercado', 'sacolão': 'Mercado',
+
   // Mercadinho (Específico)
-  'mercadinho': 'Mercadinho', 'mercearia': 'Mercadinho', 'quitanda': 'Mercadinho',
+  'mercadinho': 'Mercadinho', 'mercearia': 'Mercadinho', 'quitanda': 'Mercadinho', 'adega': 'Mercadinho',
+  'conveniencia': 'Mercadinho', 'conveniência': 'Mercadinho',
 
   // Transporte
   'uber': 'Transporte', '99': 'Transporte', 'taxi': 'Transporte', 'ônibus': 'Transporte',
   'metro': 'Transporte', 'metrô': 'Transporte', 'combustível': 'Transporte', 'gasolina': 'Transporte',
   'etanol': 'Transporte', 'posto': 'Transporte', 'estacionamento': 'Transporte', 'ipva': 'Transporte',
-  'pedagio': 'Transporte', 'pedágio': 'Transporte',
+  'pedagio': 'Transporte', 'pedágio': 'Transporte', 'oficina': 'Transporte', 'mecânico': 'Transporte',
+  'pneu': 'Transporte', 'revisão': 'Transporte', 'alinhamento': 'Transporte', 'multa': 'Transporte',
+  'sem parar': 'Transporte', 'veloe': 'Transporte', 'tag': 'Transporte', 'moto': 'Transporte',
 
   // Saúde
   'farmacia': 'Saúde', 'farmácia': 'Saúde', 'remedio': 'Saúde', 'remédio': 'Saúde',
   'médico': 'Saúde', 'medico': 'Saúde', 'dentista': 'Saúde', 'exame': 'Saúde', 
-  'consulta': 'Saúde', 'plano': 'Saúde', 'hospital': 'Saúde',
+  'consulta': 'Saúde', 'plano': 'Saúde', 'hospital': 'Saúde', 'drogaria': 'Saúde',
+  'psicologo': 'Saúde', 'terapia': 'Saúde', 'laboratório': 'Saúde', 'vacina': 'Saúde',
+  'lente': 'Saúde', 'oculos': 'Saúde', 'estética': 'Saúde', 'cabelo': 'Saúde', 
+  'barbeiro': 'Saúde', 'unha': 'Saúde', 'manicure': 'Saúde', 'gympass': 'Saúde',
+  'academia': 'Saúde', 'crossfit': 'Saúde', 'suplemento': 'Saúde', 'creatina': 'Saúde',
 
   // Lazer
   'cinema': 'Lazer', 'filme': 'Lazer', 'jogo': 'Lazer', 'steam': 'Lazer', 
-  'psn': 'Lazer', 'xbox': 'Lazer', 'bar': 'Lazer', 'cerveja': 'Lazer', 
-  'role': 'Lazer', 'rolê': 'Lazer', 'ingresso': 'Lazer', 'show': 'Lazer',
-  'spotify': 'Lazer', 'netflix': 'Lazer', 'aliexpress': 'Compras',
+  'psn': 'Lazer', 'xbox': 'Lazer', 'role': 'Lazer', 'rolê': 'Lazer', 
+  'ingresso': 'Lazer', 'show': 'Lazer', 'viagem': 'Lazer', 'hotel': 'Lazer',
+  'airbnb': 'Lazer', 'passagem': 'Lazer', 'clube': 'Lazer', 'praia': 'Lazer',
+
+  // Assinaturas (Movido de Lazer/Outros)
+  'spotify': 'Assinaturas', 'netflix': 'Assinaturas', 'youtube': 'Assinaturas',
+  'amazon prime': 'Assinaturas', 'disney': 'Assinaturas', 'hbo': 'Assinaturas',
+  'globoplay': 'Assinaturas', 'star+': 'Assinaturas', 'paramount': 'Assinaturas',
+  'apple': 'Assinaturas', 'icloud': 'Assinaturas', 'google storage': 'Assinaturas',
+  'drive': 'Assinaturas', 'chatgpt': 'Assinaturas', 'midjourney': 'Assinaturas',
+  'claude': 'Assinaturas', 'assinatura': 'Assinaturas', 'mensalidade': 'Assinaturas',
 
   // Compras
   'amazon': 'Compras', 'shopee': 'Compras', 'livre': 'Compras', 'shein': 'Compras',
   'roupa': 'Compras', 'tenis': 'Compras', 'eletronico': 'Compras', 'celular': 'Compras',
+  'aliexpress': 'Compras', 'magalu': 'Compras', 'casas bahia': 'Compras', 'fast shop': 'Compras',
+  'shopping': 'Compras', 'loja': 'Compras', 'presente': 'Compras', 'sapato': 'Compras',
 
   // Moradia
   'aluguel': 'Moradia', 'condominio': 'Moradia', 'luz': 'Moradia', 'agua': 'Moradia',
   'internet': 'Moradia', 'iptu': 'Moradia', 'gas': 'Moradia', 'gás': 'Moradia',
+  'sabesp': 'Moradia', 'enel': 'Moradia', 'cpfl': 'Moradia', 'claro': 'Moradia',
+  'vivo': 'Moradia', 'tim': 'Moradia', 'oi': 'Moradia', 'net': 'Moradia',
+  'manutenção': 'Moradia', 'obra': 'Moradia', 'pedreiro': 'Moradia', 'faxina': 'Moradia',
+  'diarista': 'Moradia', 'móvel': 'Moradia', 'eletrodoméstico': 'Moradia',
 
   // Educação
   'curso': 'Educação', 'faculdade': 'Educação', 'livro': 'Educação', 'escola': 'Educação',
-  'udemy': 'Educação', 'alura': 'Educação',
+  'udemy': 'Educação', 'alura': 'Educação', 'papelaria': 'Educação', 'material': 'Educação',
+  'idioma': 'Educação', 'inglês': 'Educação',
 
   // Investimento
   'aporte': 'Investimento', 'investimento': 'Investimento', 'cdb': 'Investimento', 
-  'fiis': 'Investimento', 'ações': 'Investimento', 'cripto': 'Investimento', 'bitcoin': 'Investimento'
+  'fiis': 'Investimento', 'ações': 'Investimento', 'cripto': 'Investimento', 'bitcoin': 'Investimento',
+  'tesouro': 'Investimento', 'selic': 'Investimento', 'corretora': 'Investimento', 'b3': 'Investimento',
+  'poupanca': 'Investimento', 'poupança': 'Investimento'
 };
 
 export const inferCategory = (title: string): string => {
   const lowerTitle = title.toLowerCase();
+  
+  // 1. Direct Keyword Match
   for (const [key, cat] of Object.entries(CATEGORY_KEYWORDS)) {
+    // Check if the title contains the keyword as a whole word or significant part
     if (lowerTitle.includes(key)) {
       return cat;
     }
   }
-  // Fallback checks
+  
+  // 2. Fallback: Check if title contains category name directly
   const foundCat = CATEGORIES.find(c => lowerTitle.includes(c.toLowerCase()));
   if (foundCat) return foundCat;
   

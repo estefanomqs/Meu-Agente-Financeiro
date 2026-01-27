@@ -1,83 +1,106 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
-import { Transaction, Subscription } from '../types';
-import { getEffectiveAmount } from '../utils';
+import { AreaChart, XAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area } from 'recharts';
+import { Transaction, Subscription, AccountSettings } from '../types';
+import { getEffectiveAmount, getEstimatedPaymentDate } from '../utils';
 
 interface Props {
   transactions: Transaction[];
   subscriptions: Subscription[];
   currentBalance: number;
+  accountSettings: AccountSettings[];
 }
 
-export const ForecastChart: React.FC<Props> = ({ transactions, subscriptions, currentBalance }) => {
-  // Simple Forecasting Logic
+export const ForecastChart: React.FC<Props> = ({ transactions, subscriptions, currentBalance, accountSettings }) => {
   const monthsToForecast = 6;
   const data = [];
-
-  // Calculate Average Income/Fixed Expenses
   const now = new Date();
+
+  // Helper to find settings for a transaction
+  const getSettings = (accountName: string) => accountSettings.find(s => s.accountId === accountName);
+
+  // 1. Calculate Average Baseline (Income - Non-Credit Expenses)
+  // We want to forecast "Predictable Cash Flow".
+  // Fixed Income + Avg Variable Debit Expenses + Subscriptions
+  
+  // Simplified logic for this demo:
+  // We assume Future Income = Avg Past Income
+  // We assume Future Expense = Specific Installments + Avg Variable Spend
+  
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(now.getMonth() - 3);
-
+  
   const relevantTx = transactions.filter(t => new Date(t.date) >= threeMonthsAgo);
-  
   let totalIncome = 0;
-  let totalExpense = 0; // Only non-installments
-  
+  let totalVariableExpense = 0;
+
   relevantTx.forEach(t => {
-    // We only use NON-installment expenses for the "Average Variable Spend" calculation
-    // Installments are calculated precisely based on their dates
-    const val = getEffectiveAmount(t);
-    if (t.type === 'income') {
-      totalIncome += val;
-    } else if (!t.isInstallment) {
-      totalExpense += val;
-    }
+     if (t.type === 'income') {
+        totalIncome += getEffectiveAmount(t);
+     } else if (!t.isInstallment) {
+        // If it's a one-off expense, add to average
+        totalVariableExpense += getEffectiveAmount(t);
+     }
   });
 
-  // Monthly Average
   const avgIncome = totalIncome / 3 || 0;
-  const avgVariableExpense = totalExpense / 3 || 0; 
-  const monthlySubscriptionCost = subscriptions.reduce((acc, s) => acc + s.value, 0);
+  const avgVariable = totalVariableExpense / 3 || 0;
+  const subsTotal = subscriptions.reduce((acc, s) => acc + s.value, 0);
+  
+  const baseMonthlyFlow = avgIncome - avgVariable - subsTotal;
 
-  // Base Net Flow (Income - Variable - Subs)
-  const baseNetFlow = avgIncome - avgVariableExpense - monthlySubscriptionCost;
-
+  // 2. Build Month-by-Month Projection
   let simulatedBalance = currentBalance;
 
   for (let i = 0; i <= monthsToForecast; i++) {
     const forecastDate = new Date();
     forecastDate.setMonth(now.getMonth() + i);
-    forecastDate.setDate(1); // Compare months
+    forecastDate.setDate(1); // Reference point
 
-    // Calculate Installments due in this specific month
-    let monthInstallmentDebt = 0;
+    let monthSpecificDebt = 0;
 
+    // Calculate Installments & Deferred Credit Card Payments falling in this month
     transactions.forEach(t => {
-      if (t.isInstallment && t.installmentsTotal && t.installmentsTotal > 0 && t.type === 'expense') {
-         const tDate = new Date(t.date);
-         
-         // Calculate the start month of the transaction
-         // Month difference
-         const monthDiff = (forecastDate.getFullYear() - tDate.getFullYear()) * 12 + (forecastDate.getMonth() - tDate.getMonth());
-         
-         // If monthDiff is >= 0 and < installmentsTotal, we owe a slice
-         if (monthDiff >= 0 && monthDiff < t.installmentsTotal) {
-           const effectiveTotal = getEffectiveAmount(t);
-           // Crucial: The monthly cost is Total / Count
-           const monthlySlice = effectiveTotal / t.installmentsTotal;
-           monthInstallmentDebt += monthlySlice;
-         }
-      }
+       if (t.type === 'expense') {
+          if (t.isInstallment && t.installmentsTotal) {
+             // For installments, we calculate the payment date of EACH installment
+             // If the payment date (adjusted by credit card logic) falls in 'forecastDate' month, add it.
+             const tDate = new Date(t.date);
+             const settings = getSettings(t.account);
+             
+             // Check all installments
+             for (let inst = 0; inst < t.installmentsTotal; inst++) {
+                // Nominal date of installment (e.g. 1st month, 2nd month...)
+                const nominalDate = new Date(tDate);
+                nominalDate.setMonth(tDate.getMonth() + inst);
+                
+                // Effective Payment Date (Credit Card Logic)
+                const payDate = getEstimatedPaymentDate(nominalDate.toISOString(), t.paymentMethod === 'Crédito' ? settings : undefined);
+
+                if (payDate.getMonth() === forecastDate.getMonth() && payDate.getFullYear() === forecastDate.getFullYear()) {
+                   monthSpecificDebt += (getEffectiveAmount(t) / t.installmentsTotal);
+                }
+             }
+          } else if (t.paymentMethod === 'Crédito') {
+             // One-off Credit Card Purchase
+             // Check if the payment falls in this forecast month
+             const settings = getSettings(t.account);
+             const payDate = getEstimatedPaymentDate(t.date, settings);
+             
+             if (payDate.getMonth() === forecastDate.getMonth() && payDate.getFullYear() === forecastDate.getFullYear()) {
+                // Warning: This transaction is already in "Avg Variable" if it was recent. 
+                // To avoid double counting, we only project "Future" credit card debts from "Past" transactions that haven't been paid yet.
+                // Or simplified: We assume AvgVariable covers new spending, and this loop covers "Existing Debt being paid off".
+                // Since this is a simple forecast: let's only count if it is a specific known future commitment or a very recent transaction not yet paid.
+                // For simplicity in this demo, we skip one-off credit card lag to avoid complexity, 
+                // focusing heavily on Installments which are the main "Future Debt".
+             }
+          }
+       }
     });
 
-    // For the current month (i=0), we assume currentBalance ALREADY reflects transactions made so far.
-    // However, for PROJECTION, we add the base flow.
-    // To smooth it out: Month 0 is just "Now". Month 1 is "Now + Flow".
-    
     if (i > 0) {
-      simulatedBalance += baseNetFlow;
-      simulatedBalance -= monthInstallmentDebt;
+       simulatedBalance += baseMonthlyFlow;
+       simulatedBalance -= monthSpecificDebt;
     }
 
     data.push({
