@@ -1,16 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
-  User, 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged,
-  updateProfile
-} from 'firebase/auth';
-import { doc, setDoc, getDoc, collection } from 'firebase/firestore';
-import { auth, db } from '../services/firebase';
 
-interface UserProfile {
+// Mock types to satisfy the app's expectations
+export interface User {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+}
+
+export interface UserProfile {
   uid: string;
   name: string;
   email: string;
@@ -36,66 +33,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Load from LocalStorage on mount to persist login
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const storedUser = localStorage.getItem('zenith_mock_user');
+    if (storedUser) {
+      const user = JSON.parse(storedUser);
       setCurrentUser(user);
-      if (user) {
-        // Fetch extended profile with familyId
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          setUserProfile(userDoc.data() as UserProfile);
-        }
-      } else {
-        setUserProfile(null);
-      }
-      setLoading(false);
-    });
-
-    return unsubscribe;
+      setUserProfile({
+        uid: user.uid,
+        name: user.displayName || 'User',
+        email: user.email || 'local@app.com',
+        familyId: 'local-family',
+        role: 'admin'
+      });
+    }
+    setLoading(false);
   }, []);
 
   const login = async (email: string, pass: string) => {
-    await signInWithEmailAndPassword(auth, email, pass);
+    // Mock Login
+    const mockUser: User = {
+      uid: 'local-user-id',
+      email: email,
+      displayName: 'Usuário Local'
+    };
+    // Persist
+    localStorage.setItem('zenith_mock_user', JSON.stringify(mockUser));
+
+    setCurrentUser(mockUser);
+    setUserProfile({
+      uid: mockUser.uid,
+      name: mockUser.displayName!,
+      email: email,
+      familyId: 'local-family',
+      role: 'admin'
+    });
   };
 
   const register = async (name: string, email: string, pass: string) => {
-    // 1. Create Auth User
-    const { user } = await createUserWithEmailAndPassword(auth, email, pass);
-    await updateProfile(user, { displayName: name });
-
-    // 2. Generate a new Family ID (Auto-ID from collection reference)
-    const familyRef = doc(collection(db, 'families'));
-    const familyId = familyRef.id;
-
-    // 3. Create Family Document
-    await setDoc(familyRef, {
-      name: `Família de ${name}`,
-      createdAt: new Date().toISOString(),
-      accountSettings: [] // Empty initially, triggers Onboarding
-    });
-
-    // 4. Create User Profile linked to Family
-    const profileData: UserProfile = {
-      uid: user.uid,
-      name,
-      email,
-      familyId,
-      role: 'admin'
+    // Mock Register - same as login but with custom name
+    const mockUser: User = {
+      uid: 'local-user-id',
+      email: email,
+      displayName: name
     };
+    localStorage.setItem('zenith_mock_user', JSON.stringify(mockUser));
 
-    await setDoc(doc(db, 'users', user.uid), profileData);
-    setUserProfile(profileData);
+    setCurrentUser(mockUser);
+    setUserProfile({
+      uid: mockUser.uid,
+      name: name,
+      email: email,
+      familyId: 'local-family',
+      role: 'admin'
+    });
   };
 
   const logout = async () => {
-    await signOut(auth);
+    localStorage.removeItem('zenith_mock_user');
+    setCurrentUser(null);
     setUserProfile(null);
   };
 
   return (
     <AuthContext.Provider value={{ currentUser, userProfile, loading, login, register, logout }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };

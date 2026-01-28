@@ -2,19 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { AppData, Transaction, Subscription, Goal, AccountSettings, Budget } from '../types';
 import { generateId, inferCategory } from '../utils';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../services/firebase';
-import { 
-  collection, 
-  addDoc, 
-  deleteDoc, 
-  doc, 
-  updateDoc, 
-  onSnapshot, 
-  query, 
-  orderBy,
-  setDoc,
-  getDoc
-} from 'firebase/firestore';
+
+const STORAGE_KEY = 'zenith_finance_data_local_v2';
 
 const INITIAL_DATA: AppData = {
   userProfile: { name: '', hasCompletedOnboarding: false },
@@ -28,163 +17,131 @@ const INITIAL_DATA: AppData = {
 export const useFinanceStore = () => {
   const [data, setData] = useState<AppData>(INITIAL_DATA);
   const [privacyMode, setPrivacyMode] = useState(false);
-  const { userProfile, currentUser } = useAuth();
+  const [isLoaded, setIsLoaded] = useState(false);
+  const { userProfile } = useAuth();
 
-  // --- REAL-TIME SYNC ---
+  // Load from LocalStorage
   useEffect(() => {
-    if (!currentUser || !userProfile?.familyId) return;
-
-    const familyId = userProfile.familyId;
-    const familyRef = doc(db, 'families', familyId);
-
-    // 1. Listen to Family Settings (Account Configs)
-    const unsubFamily = onSnapshot(familyRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const familyData = docSnap.data();
-        setData(prev => ({
-          ...prev,
-          accountSettings: familyData.accountSettings || [],
-          // Update local profile name mostly for greeting
-          userProfile: { ...prev.userProfile, name: userProfile.name, hasCompletedOnboarding: (familyData.accountSettings?.length > 0) }
-        }));
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        const merged = { ...INITIAL_DATA, ...parsed };
+        setData(merged);
+      } catch (e) {
+        console.error("Data Load Error", e);
       }
-    });
+    }
+    setIsLoaded(true);
+  }, []);
 
-    // 2. Listen to Transactions
-    const txQuery = query(collection(db, 'families', familyId, 'transactions'), orderBy('date', 'desc'));
-    const unsubTx = onSnapshot(txQuery, (snapshot) => {
-      const transactions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Transaction));
-      setData(prev => ({ ...prev, transactions }));
-    });
+  // Save to LocalStorage
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+  }, [data, isLoaded]);
 
-    // 3. Listen to Goals
-    const unsubGoals = onSnapshot(collection(db, 'families', familyId, 'goals'), (snapshot) => {
-      const goals = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Goal));
-      setData(prev => ({ ...prev, goals }));
-    });
+  // Sync basic profile data from Auth to Store if needed
+  useEffect(() => {
+    if (userProfile && isLoaded) {
+      setData(prev => {
+        if (prev.userProfile.name !== userProfile.name) {
+          return { ...prev, userProfile: { ...prev.userProfile, name: userProfile.name } };
+        }
+        return prev;
+      });
+    }
+  }, [userProfile, isLoaded]);
 
-    // 4. Listen to Subscriptions
-    const unsubSubs = onSnapshot(collection(db, 'families', familyId, 'subscriptions'), (snapshot) => {
-      const subscriptions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Subscription));
-      setData(prev => ({ ...prev, subscriptions }));
-    });
-
-    // 5. Listen to Budgets
-    const unsubBudgets = onSnapshot(collection(db, 'families', familyId, 'budgets'), (snapshot) => {
-      const budgets = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Budget));
-      setData(prev => ({ ...prev, budgets }));
-    });
-
-    return () => {
-      unsubFamily();
-      unsubTx();
-      unsubGoals();
-      unsubSubs();
-      unsubBudgets();
-    };
-  }, [currentUser, userProfile]);
-
-  // --- ACTIONS (Firestore Writes) ---
+  // --- ACTIONS ---
 
   const completeOnboarding = useCallback(async (name: string, settings: AccountSettings[]) => {
-    if (!userProfile?.familyId) return;
-    // We update the User Profile Name AND the Family Account Settings
-    const familyRef = doc(db, 'families', userProfile.familyId);
-    
-    // Parallel update
-    await Promise.all([
-      updateDoc(familyRef, { accountSettings: settings }),
-      // Update local state logic handled by snapshot, but we can force name update on user profile if needed
-    ]);
-  }, [userProfile]);
+    setData(prev => ({
+      ...prev,
+      userProfile: { name, hasCompletedOnboarding: true },
+      accountSettings: settings
+    }));
+  }, []);
 
   const addTransaction = useCallback(async (partialT: Omit<Transaction, 'id'>) => {
-    if (!userProfile?.familyId) return;
-    await addDoc(collection(db, 'families', userProfile.familyId, 'transactions'), partialT);
-  }, [userProfile]);
+    const newT: Transaction = {
+      id: generateId(),
+      ...partialT as any // cast generic
+    };
+    setData(prev => ({ ...prev, transactions: [newT, ...prev.transactions] }));
+  }, []);
 
   const editTransaction = useCallback(async (id: string, updatedT: Omit<Transaction, 'id'>) => {
-    if (!userProfile?.familyId) return;
-    const txRef = doc(db, 'families', userProfile.familyId, 'transactions', id);
-    await updateDoc(txRef, updatedT);
-  }, [userProfile]);
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.map(t => t.id === id ? { ...updatedT, id } : t)
+    }));
+  }, []);
 
   const deleteTransaction = useCallback(async (id: string) => {
-    if (!userProfile?.familyId) return;
-    await deleteDoc(doc(db, 'families', userProfile.familyId, 'transactions', id));
-  }, [userProfile]);
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.filter(t => t.id !== id)
+    }));
+  }, []);
 
   const addSubscription = useCallback(async (sub: Omit<Subscription, 'id'>) => {
-    if (!userProfile?.familyId) return;
-    await addDoc(collection(db, 'families', userProfile.familyId, 'subscriptions'), sub);
-  }, [userProfile]);
+    const newSub: Subscription = { id: generateId(), ...sub };
+    setData(prev => ({ ...prev, subscriptions: [...prev.subscriptions, newSub] }));
+  }, []);
 
   const addGoal = useCallback(async (goal: Omit<Goal, 'id'>) => {
-    if (!userProfile?.familyId) return;
-    await addDoc(collection(db, 'families', userProfile.familyId, 'goals'), goal);
-  }, [userProfile]);
+    const newG: Goal = { id: generateId(), currentValue: 0, ...goal };
+    setData(prev => ({ ...prev, goals: [...prev.goals, newG] }));
+  }, []);
 
-  const updateGoal = useCallback(async (id: string, amount: number) => {
-    if (!userProfile?.familyId) return;
-    await updateDoc(doc(db, 'families', userProfile.familyId, 'goals', id), { currentValue: amount });
-  }, [userProfile]);
-  
+  const updateGoal = useCallback(async (id: string, amount: number) => { // Amount here is mostly 'currentValue' setter in firebase context
+    setData(prev => ({
+      ...prev,
+      goals: prev.goals.map(g => g.id === id ? { ...g, currentValue: amount } : g)
+    }));
+  }, []);
+
   const addFundsToGoal = useCallback(async (id: string, amountToAdd: number) => {
-    if (!userProfile?.familyId) return;
-    const goalRef = doc(db, 'families', userProfile.familyId, 'goals', id);
-    const goalSnap = await getDoc(goalRef);
-    if(goalSnap.exists()) {
-        const current = goalSnap.data().currentValue || 0;
-        await updateDoc(goalRef, { currentValue: current + amountToAdd });
-    }
-  }, [userProfile]);
+    setData(prev => ({
+      ...prev,
+      goals: prev.goals.map(g => g.id === id ? { ...g, currentValue: (g.currentValue || 0) + amountToAdd } : g)
+    }));
+  }, []);
 
   const updateAccountSettings = useCallback(async (settings: AccountSettings) => {
-    if (!userProfile?.familyId) return;
-    const familyRef = doc(db, 'families', userProfile.familyId);
-    
-    // We need to read current settings to merge, but since we have 'data.accountSettings' from sync:
-    const currentSettings = data.accountSettings || [];
-    const existingIdx = currentSettings.findIndex(a => a.accountId === settings.accountId);
-      
-    let newSettings = [...currentSettings];
-    if (existingIdx >= 0) {
-      newSettings[existingIdx] = settings;
-    } else {
-      newSettings.push(settings);
-    }
-
-    await updateDoc(familyRef, { accountSettings: newSettings });
-  }, [userProfile, data.accountSettings]);
+    setData(prev => {
+      const existing = prev.accountSettings.findIndex(a => a.accountId === settings.accountId);
+      const newSettings = [...prev.accountSettings];
+      if (existing >= 0) newSettings[existing] = settings;
+      else newSettings.push(settings);
+      return { ...prev, accountSettings: newSettings };
+    });
+  }, []);
 
   const setBudget = useCallback(async (budget: Omit<Budget, 'id'>) => {
-    if (!userProfile?.familyId) return;
-    
-    // Budgets are a subcollection, so we query to find if exists, or add
-    // Since we don't have the ID passed in 'budget' obj here (it's omit ID), 
-    // we iterate existing local data to find ID.
-    const existing = data.budgets.find(b => b.category === budget.category);
-    
-    if (existing) {
-       await updateDoc(doc(db, 'families', userProfile.familyId, 'budgets', existing.id), { limit: budget.limit });
-    } else {
-       await addDoc(collection(db, 'families', userProfile.familyId, 'budgets'), budget);
-    }
-  }, [userProfile, data.budgets]);
+    setData(prev => {
+      const idx = prev.budgets.findIndex(b => b.category === budget.category);
+      const newBudgets = [...prev.budgets];
+      if (idx >= 0) {
+        newBudgets[idx] = { ...newBudgets[idx], limit: budget.limit };
+      } else {
+        newBudgets.push({ id: generateId(), ...budget });
+      }
+      return { ...prev, budgets: newBudgets };
+    });
+  }, []);
 
   const deleteBudget = useCallback(async (id: string) => {
-    if (!userProfile?.familyId) return;
-    await deleteDoc(doc(db, 'families', userProfile.familyId, 'budgets', id));
-  }, [userProfile]);
+    setData(prev => ({ ...prev, budgets: prev.budgets.filter(b => b.id !== id) }));
+  }, []);
 
-  // Import Logic - Batch write
+  // Import Logic (Restored from Firebase version but local)
   const importCSV = useCallback(async (csvContent: string, defaultAccount: string = 'Inter') => {
-    if (!userProfile?.familyId) return;
-    
-    // ... Parsing logic same as before ...
     const lines = csvContent.split('\n');
-    const newTransactions: Omit<Transaction, 'id'>[] = [];
-      
+    const newTransactions: Transaction[] = [];
+
     lines.forEach(line => {
       if (!line.trim()) return;
       const parts = line.split(/[;,]/);
@@ -192,10 +149,10 @@ export const useFinanceStore = () => {
 
       let dateStr = parts[0].trim();
       let desc = parts[1].trim();
-      let valueStr = parts[parts.length - 1].trim(); 
+      let valueStr = parts[parts.length - 1].trim();
 
       const dateMatch = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-      if (!dateMatch) return; 
+      if (!dateMatch) return;
 
       const [_, d, m, y] = dateMatch;
       const isoDate = new Date(`${y}-${m}-${d}`).toISOString();
@@ -209,13 +166,14 @@ export const useFinanceStore = () => {
       const category = inferCategory(desc);
 
       newTransactions.push({
+        id: generateId(),
         date: isoDate,
         origin: desc,
         amount,
         type,
         category,
         account: defaultAccount,
-        paymentMethod: type === 'expense' ? 'Débito' : 'N/A', 
+        paymentMethod: type === 'expense' ? 'Débito' : 'N/A',
         tags: ['Importado'],
         isInstallment: false,
         isShared: false
@@ -223,22 +181,22 @@ export const useFinanceStore = () => {
     });
 
     if (newTransactions.length > 0) {
-      // Create batch or simple loop (Firestore batch limit 500)
-      // For simplicity in this demo, promise.all
-      const promises = newTransactions.map(t => addDoc(collection(db, 'families', userProfile.familyId, 'transactions'), t));
-      await Promise.all(promises);
+      setData(prev => ({ ...prev, transactions: [...prev.transactions, ...newTransactions] }));
       alert(`${newTransactions.length} transações importadas!`);
     }
-  }, [userProfile]);
+  }, []);
 
-  // Import JSON Data - Full Restore (Careful with ID conflicts, usually wipe and replace or merge)
-  // For SaaS, "Restore Backup" is tricky. Let's make it add only for now.
   const importData = async (jsonStr: string) => {
-     // Implementation simplified for SaaS context: We won't allow full JSON state replacement
-     // because it would overwrite other family members' work or break IDs.
-     // Feature disabled or restricted to specific logic in future.
-     console.log("Full backup restore disabled in Family Mode to prevent data loss.");
-     return false;
+    try {
+      const parsed = JSON.parse(jsonStr);
+      // Basic validation
+      if (!parsed.transactions) throw new Error("Invalid format");
+      setData(prev => ({ ...INITIAL_DATA, ...parsed }));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   };
 
   const exportData = () => JSON.stringify(data, null, 2);

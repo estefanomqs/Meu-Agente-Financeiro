@@ -3,7 +3,7 @@ import { Transaction, AccountSettings } from './types';
 export const ACCOUNTS = ['Inter', 'Nubank', 'Caixa', 'MercadoPago', 'Bradesco', 'Itaú', 'Santander', 'Carteira', 'Outro'];
 
 export const CATEGORIES = [
-  'Alimentação', 'Mercado', 'Mercadinho', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 
+  'Alimentação', 'Mercado', 'Mercadinho', 'Transporte', 'Moradia', 'Lazer', 'Saúde',
   'Educação', 'Assinaturas', 'Compras', 'Bico', 'Salário', 'Investimento', 'Outros'
 ];
 
@@ -19,7 +19,7 @@ export const CATEGORY_KEYWORDS: Record<string, string> = {
   'boteco': 'Alimentação', 'cerveja': 'Alimentação', 'bebida': 'Alimentação', 'rest': 'Alimentação',
 
   // Mercado
-  'mercado': 'Mercado', 'supermercado': 'Mercado', 'compra do mês': 'Mercado', 
+  'mercado': 'Mercado', 'supermercado': 'Mercado', 'compra do mês': 'Mercado',
   'carrefour': 'Mercado', 'extra': 'Mercado', 'savegnago': 'Mercado', 'atacado': 'Mercado',
   'assai': 'Mercado', 'tenda': 'Mercado', 'dia': 'Mercado', 'pão de açúcar': 'Mercado',
   'shibata': 'Mercado', 'nagumo': 'Mercado', 'atacadão': 'Mercado', 'varejão': 'Mercado',
@@ -39,16 +39,16 @@ export const CATEGORY_KEYWORDS: Record<string, string> = {
 
   // Saúde
   'farmacia': 'Saúde', 'farmácia': 'Saúde', 'remedio': 'Saúde', 'remédio': 'Saúde',
-  'médico': 'Saúde', 'medico': 'Saúde', 'dentista': 'Saúde', 'exame': 'Saúde', 
+  'médico': 'Saúde', 'medico': 'Saúde', 'dentista': 'Saúde', 'exame': 'Saúde',
   'consulta': 'Saúde', 'plano': 'Saúde', 'hospital': 'Saúde', 'drogaria': 'Saúde',
   'psicologo': 'Saúde', 'terapia': 'Saúde', 'laboratório': 'Saúde', 'vacina': 'Saúde',
-  'lente': 'Saúde', 'oculos': 'Saúde', 'estética': 'Saúde', 'cabelo': 'Saúde', 
+  'lente': 'Saúde', 'oculos': 'Saúde', 'estética': 'Saúde', 'cabelo': 'Saúde',
   'barbeiro': 'Saúde', 'unha': 'Saúde', 'manicure': 'Saúde', 'gympass': 'Saúde',
   'academia': 'Saúde', 'crossfit': 'Saúde', 'suplemento': 'Saúde', 'creatina': 'Saúde',
 
   // Lazer
-  'cinema': 'Lazer', 'filme': 'Lazer', 'jogo': 'Lazer', 'steam': 'Lazer', 
-  'psn': 'Lazer', 'xbox': 'Lazer', 'role': 'Lazer', 'rolê': 'Lazer', 
+  'cinema': 'Lazer', 'filme': 'Lazer', 'jogo': 'Lazer', 'steam': 'Lazer',
+  'psn': 'Lazer', 'xbox': 'Lazer', 'role': 'Lazer', 'rolê': 'Lazer',
   'ingresso': 'Lazer', 'show': 'Lazer', 'viagem': 'Lazer', 'hotel': 'Lazer',
   'airbnb': 'Lazer', 'passagem': 'Lazer', 'clube': 'Lazer', 'praia': 'Lazer',
 
@@ -80,7 +80,7 @@ export const CATEGORY_KEYWORDS: Record<string, string> = {
   'idioma': 'Educação', 'inglês': 'Educação',
 
   // Investimento
-  'aporte': 'Investimento', 'investimento': 'Investimento', 'cdb': 'Investimento', 
+  'aporte': 'Investimento', 'investimento': 'Investimento', 'cdb': 'Investimento',
   'fiis': 'Investimento', 'ações': 'Investimento', 'cripto': 'Investimento', 'bitcoin': 'Investimento',
   'tesouro': 'Investimento', 'selic': 'Investimento', 'corretora': 'Investimento', 'b3': 'Investimento',
   'poupanca': 'Investimento', 'poupança': 'Investimento'
@@ -88,7 +88,7 @@ export const CATEGORY_KEYWORDS: Record<string, string> = {
 
 export const inferCategory = (title: string): string => {
   const lowerTitle = title.toLowerCase();
-  
+
   // 1. Direct Keyword Match
   for (const [key, cat] of Object.entries(CATEGORY_KEYWORDS)) {
     // Check if the title contains the keyword as a whole word or significant part
@@ -96,11 +96,11 @@ export const inferCategory = (title: string): string => {
       return cat;
     }
   }
-  
+
   // 2. Fallback: Check if title contains category name directly
   const foundCat = CATEGORIES.find(c => lowerTitle.includes(c.toLowerCase()));
   if (foundCat) return foundCat;
-  
+
   return 'Outros';
 };
 
@@ -108,7 +108,7 @@ export const ACCOUNT_COLORS: Record<string, string> = {
   'Inter': 'text-orange-500 border-orange-500/20 bg-orange-500/10',
   'Nubank': 'text-purple-500 border-purple-500/20 bg-purple-500/10',
   'Caixa': 'text-blue-500 border-blue-500/20 bg-blue-500/10',
-  'MercadoPago': 'text-blue-400 border-blue-400/20 bg-blue-400/10', 
+  'MercadoPago': 'text-blue-400 border-blue-400/20 bg-blue-400/10',
   'Bradesco': 'text-red-500 border-red-500/20 bg-red-500/10',
   'Itaú': 'text-orange-600 border-orange-600/20 bg-orange-600/10',
   'Santander': 'text-red-600 border-red-600/20 bg-red-600/10',
@@ -156,8 +156,8 @@ export const formatCurrencyInput = (value: string) => {
 };
 
 export const parseCurrencyToNumber = (value: string) => {
-   const onlyDigits = value.replace(/\D/g, "");
-   return Number(onlyDigits) / 100;
+  const onlyDigits = value.replace(/\D/g, "");
+  return Number(onlyDigits) / 100;
 }
 
 export const generateId = () => Math.random().toString(36).substring(2, 9);
@@ -185,11 +185,11 @@ export const getInstallmentValue = (t: Transaction) => {
 // Returns the installment index (1-based) if active, or null if not.
 export const getActiveInstallmentIndex = (t: Transaction, targetDate: Date): number | null => {
   const tDate = new Date(t.date);
-  
+
   // Normalize to 1st of month to ignore time/day differences
   const targetYear = targetDate.getFullYear();
   const targetMonth = targetDate.getMonth();
-  
+
   const startYear = tDate.getFullYear();
   const startMonth = tDate.getMonth();
 
@@ -211,11 +211,11 @@ export const getActiveInstallmentIndex = (t: Transaction, targetDate: Date): num
 // Credit Card Logic: Calculates the actual cash flow date based on Closing/Due Day
 export const getEstimatedPaymentDate = (transactionDate: string, settings?: AccountSettings): Date => {
   const tDate = new Date(transactionDate);
-  
+
   if (!settings) return tDate; // No settings = debit logic (immediate)
 
   const closingDate = new Date(tDate.getFullYear(), tDate.getMonth(), settings.closingDay);
-  
+
   // If transaction is AFTER closing day, it goes to next month's bill
   if (tDate.getDate() > settings.closingDay) {
     // Due date is in the NEXT month
@@ -226,20 +226,60 @@ export const getEstimatedPaymentDate = (transactionDate: string, settings?: Acco
     // Due date is THIS month (or next, depending on if Due Day < Closing Day which is rare but possible)
     // Standard logic: bought before closing -> pay on this month's due date
     let dueDate = new Date(tDate.getFullYear(), tDate.getMonth(), settings.dueDay);
-    
+
     // Safety: If Due Day is smaller than Closing day (e.g. Closing 5, Due 1), it usually means Due is next month actually
     // But usually Closing ~25th, Due ~5th (next month).
     // Let's assume standard: Closing Day X, Due Day Y (Y usually > X or Y is early next month)
-    
+
     // Better Logic:
     // If we are BEFORE closing, we pay on the UPCOMING due day.
     // If today is 15th, closing is 20th, due is 27th -> pay 27th.
     // If today is 15th, closing is 20th, due is 5th (next month) -> pay 5th next month.
-    
+
     if (settings.dueDay < settings.closingDay) {
-       dueDate = new Date(tDate.getFullYear(), tDate.getMonth() + 1, settings.dueDay);
+      dueDate = new Date(tDate.getFullYear(), tDate.getMonth() + 1, settings.dueDay);
     }
-    
+
     return dueDate;
   }
+};
+
+// Centralized logic to get all installment dates for a transaction
+export const getInstallmentDates = (t: Transaction, settings?: AccountSettings): Date[] => {
+  if (!t.isInstallment || !t.installmentsTotal || t.installmentsTotal <= 1) {
+    // Single payment
+    const date = t.paymentMethod === 'Crédito'
+      ? getEstimatedPaymentDate(t.date, settings)
+      : new Date(t.date);
+    return [date];
+  }
+
+  const dates: Date[] = [];
+
+  // 1. Determine the first installment date
+  // For Credit: based on Close Day. For others: based on Purchase Date.
+  let firstDate: Date;
+
+  if (t.paymentMethod === 'Crédito') {
+    firstDate = getEstimatedPaymentDate(t.date, settings);
+  } else {
+    firstDate = new Date(t.date);
+    // For non-credit installments (recurrence), usually implies next month? 
+    // User context implies Credit Card mainly. 
+    // If "Recurring" (Assinatura) -> same day each month.
+    // If "Parcelado" without Credit Card -> debatable, but let's assume same logic: 
+    // Start date, then +1 month.
+  }
+
+  // 2. Generate subsequent dates
+  for (let i = 0; i < t.installmentsTotal; i++) {
+    const nextDate = new Date(firstDate);
+    // CAUTION: setMonth handles rollover (Jan 31 + 1 mo -> Feb 28/29). 
+    // This is generally desired for "Monthly" payments.
+    // Since firstDate (Due Date) is usually a safe day (Day 7, 10, etc.), this is safe.
+    nextDate.setMonth(firstDate.getMonth() + i);
+    dates.push(nextDate);
+  }
+
+  return dates;
 };
