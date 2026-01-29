@@ -37,9 +37,16 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
 
    // New: Account Selection State
    const [targetAccount, setTargetAccount] = useState('Inter');
+   const [isCreditImport, setIsCreditImport] = useState(true); // Default to true for "Faturas"
 
    // Get Settings & Transactions from Store
    const { data: { accountSettings, transactions: existingTransactions } } = useFinanceStore();
+
+   // Auto-detect credit mode based on account settings
+   useEffect(() => {
+      const hasSettings = accountSettings.some(s => s.accountId === targetAccount);
+      if (hasSettings) setIsCreditImport(true);
+   }, [targetAccount, accountSettings]);
 
    // Selection State
    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -63,22 +70,34 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
    }, [isOpen, pendingFile]);
 
    // --- DEDUPLICATION HELPER ---
+   // --- DEDUPLICATION HELPER ---
    const isDuplicate = (draft: Partial<Transaction>) => {
-      // Create a signature for the draft
-      // Match: Date (YYYY-MM-DD), Amount (Exact), Origin (Rough string match)
       if (!draft.date || draft.amount === undefined || !draft.origin) return false;
 
-      const draftDate = draft.date.split('T')[0];
+      // Normalize helpers
+      const cleanStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const getDay = (d: string) => d.split('T')[0];
+
+      const draftDate = getDay(draft.date);
       const draftAmount = draft.amount;
-      const draftOrigin = draft.origin.toLowerCase().trim();
+      const draftOriginClean = cleanStr(draft.origin);
 
       return existingTransactions.some(existing => {
-         const existingDate = existing.date.split('T')[0];
-         // Allow tiny floating point diff
-         const amountMatch = Math.abs(existing.amount - draftAmount) < 0.01;
-         const originMatch = existing.origin.toLowerCase().trim() === draftOrigin;
+         const existingDate = getDay(existing.date);
+         const amountMatch = Math.abs(existing.amount - draftAmount) < 0.02; // Relaxed epsilon slightly
 
-         return existingDate === draftDate && amountMatch && originMatch;
+         // Level 1: Absolute Match (Day + Amount + CleanDesc)
+         if (existingDate === draftDate && amountMatch) {
+            const existingOriginClean = cleanStr(existing.origin);
+
+            // Exact cleaned match
+            if (existingOriginClean === draftOriginClean) return true;
+
+            // Substring match (e.g. "Uber 123" vs "Uber")
+            if (draftOriginClean.includes(existingOriginClean) || existingOriginClean.includes(draftOriginClean)) return true;
+         }
+
+         return false;
       });
    };
 
@@ -95,7 +114,18 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
 
    // --- PARSING LOGIC ---
 
+   const [pdfWarningFile, setPdfWarningFile] = useState<File | null>(null);
+
    const processFile = async (file: File) => {
+      // Intercept PDF for warning
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+         setPdfWarningFile(file);
+         return;
+      }
+      runParsing(file);
+   };
+
+   const runParsing = async (file: File) => {
       // LIMPEZA FORÇADA: Zera qualquer estado anterior antes de começar
       setDrafts([]);
       setSelectedIds(new Set());
@@ -119,12 +149,20 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
       }
    };
 
-   const getPaymentMethodForAccount = (type: TransactionType) => {
-      const hasSettings = accountSettings.some(s => s.accountId === targetAccount);
-      if (hasSettings && type === 'expense') {
+   const confirmPdfImport = () => {
+      if (pdfWarningFile) {
+         runParsing(pdfWarningFile);
+         setPdfWarningFile(null);
+      }
+   };
+
+   // --- PAYMENT METHOD HELPER ---
+   const getPaymentMethodForImport = (type: TransactionType) => {
+      // If user explicitly said "Credit", force it for expenses
+      if (isCreditImport && type === 'expense') {
          return 'Crédito';
       }
-      if (type === 'income') return 'Pix';
+      if (type === 'income') return 'Pix'; // Income is rarely credit reversal unless specified
       return 'Débito';
    };
 
@@ -226,7 +264,7 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                      type,
                      category,
                      account: targetAccount,
-                     paymentMethod: getPaymentMethodForAccount(type),
+                     paymentMethod: getPaymentMethodForImport(type),
                      tags: ['Importado'],
                      isInstallment: false,
                      isShared: false
@@ -259,118 +297,134 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
    };
 
    const parsePDF = async (file: File) => {
-      try {
-         const arrayBuffer = await file.arrayBuffer();
-         const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-         const pdf = await loadingTask.promise;
+      // Safety Timeout
+      const timeoutPromise = new Promise((_, reject) =>
+         setTimeout(() => reject(new Error("Tempo limite excedido ao processar PDF (15s). Verifique sua conexão ou tente outro arquivo.")), 15000)
+      );
 
-         let fullText = '';
-
-         for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map((item: any) => item.str).join(' ');
-            fullText += pageText + '\n';
-         }
-
-         const monthMap: Record<string, number> = {
-            'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
-            'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
-         };
-
-         const parsedDrafts: DraftTransaction[] = [];
-         let duplicatesRemoved = 0;
-         const regexInter = /(\d{1,2})\s+de\s+([a-zç]{3,})\.?\s+(\d{4})\s+(.*?)\s+-\s+(?:R\$\s*)?(-?[\d\.,]+)/gi;
-
-         let match;
-         while ((match = regexInter.exec(fullText)) !== null) {
-            const day = parseInt(match[1]);
-            const monthStr = match[2].toLowerCase().substring(0, 3);
-            const year = parseInt(match[3]);
-            const rawDesc = match[4].trim();
-            const rawAmount = match[5];
-
-            const month = monthMap[monthStr] !== undefined ? monthMap[monthStr] : 0;
-            const amountValStr = rawAmount.replace(/\./g, '').replace(',', '.');
-            let amount = parseFloat(amountValStr);
-
-            let type: TransactionType = 'expense';
-
-            if (amount < 0) {
-               type = 'income';
-               amount = Math.abs(amount);
-            } else {
-               type = 'expense';
+      const processingPromise = (async () => {
+         try {
+            // Re-assert worker if needed
+            if (pdfjs.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
+               pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js`;
             }
 
-            if (rawDesc.toLowerCase().includes('estorno') || rawDesc.toLowerCase().includes('reembolso')) {
-               type = 'income';
+            const arrayBuffer = await file.arrayBuffer();
+            const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+            const pdf = await loadingTask.promise;
+
+            let fullText = '';
+
+            for (let i = 1; i <= pdf.numPages; i++) {
+               const page = await pdf.getPage(i);
+               const textContent = await page.getTextContent();
+               const pageText = textContent.items.map((item: any) => item.str).join(' ');
+               fullText += pageText + '\n';
             }
 
-            if (rawDesc.includes('Total da sua fatura') || rawDesc.includes('Pagamento mínimo')) continue;
-
-            let isInstallment = false;
-            let installmentsTotal = undefined;
-            let currentInstallment = undefined;
-
-            const instMatch = rawDesc.match(/\(Parcela (\d+) de (\d+)\)/i);
-            if (instMatch) {
-               isInstallment = true;
-               currentInstallment = parseInt(instMatch[1]);
-               installmentsTotal = parseInt(instMatch[2]);
-            }
-
-            const cleanDesc = rawDesc.replace(/\(Parcela \d+ de \d+\)/i, '').trim();
-            const category = inferCategory(cleanDesc);
-
-            // FIX: PDF usually lists the INSTALLMENT value (e.g. 474.08), but our app expects TOTAL value (4740.80).
-            // We must multiply if it is an installment to project correctly.
-            let finalAmount = Math.abs(amount);
-            if (isInstallment && installmentsTotal && installmentsTotal > 1) {
-               finalAmount = finalAmount * installmentsTotal;
-            }
-
-            const draftObj = {
-               tempId: generateId(),
-               date: new Date(year, month, day).toISOString(),
-               origin: cleanDesc,
-               amount: finalAmount,
-               type,
-               category,
-               account: targetAccount,
-               paymentMethod: getPaymentMethodForAccount(type),
-               tags: ['Fatura PDF'],
-               isInstallment,
-               installmentsTotal,
-               currentInstallment,
-               isShared: false,
-               rawLine: match[0]
+            const monthMap: Record<string, number> = {
+               'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
+               'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
             };
 
-            const isDup = isDuplicate(draftObj);
+            const parsedDrafts: DraftTransaction[] = [];
+            let duplicatesRemoved = 0;
+            const regexInter = /(\d{1,2})\s+de\s+([a-zç]{3,})\.?\s+(\d{4})\s+(.*?)\s+-\s+(?:R\$\s*)?(-?[\d\.,]+)/gi;
 
-            if (isDup) {
-               duplicatesRemoved++;
-            } else {
-               parsedDrafts.push({
-                  ...draftObj,
-                  status: 'pending',
+            let match;
+            while ((match = regexInter.exec(fullText)) !== null) {
+               const day = parseInt(match[1]);
+               const monthStr = match[2].toLowerCase().substring(0, 3);
+               const year = parseInt(match[3]);
+               const rawDesc = match[4].trim();
+               const rawAmount = match[5];
+
+               const month = monthMap[monthStr] !== undefined ? monthMap[monthStr] : 0;
+               const amountValStr = rawAmount.replace(/\./g, '').replace(',', '.');
+               let amount = parseFloat(amountValStr);
+
+               let type: TransactionType = 'expense';
+
+               if (amount < 0) {
+                  type = 'income';
+                  amount = Math.abs(amount);
+               } else {
+                  type = 'expense';
+               }
+
+               if (rawDesc.toLowerCase().includes('estorno') || rawDesc.toLowerCase().includes('reembolso')) {
+                  type = 'income';
+               }
+
+               if (rawDesc.includes('Total da sua fatura') || rawDesc.includes('Pagamento mínimo')) continue;
+
+               let isInstallment = false;
+               let installmentsTotal = undefined;
+               let currentInstallment = undefined;
+
+               const instMatch = rawDesc.match(/\(Parcela (\d+) de (\d+)\)/i);
+               if (instMatch) {
+                  isInstallment = true;
+                  currentInstallment = parseInt(instMatch[1]);
+                  installmentsTotal = parseInt(instMatch[2]);
+               }
+
+               const cleanDesc = rawDesc.replace(/\(Parcela \d+ de \d+\)/i, '').trim();
+               const category = inferCategory(cleanDesc);
+
+               // FIX: PDF usually lists the INSTALLMENT value (e.g. 474.08), but our app expects TOTAL value (4740.80).
+               // We must multiply if it is an installment to project correctly.
+               let finalAmount = Math.abs(amount);
+               if (isInstallment && installmentsTotal && installmentsTotal > 1) {
+                  finalAmount = finalAmount * installmentsTotal;
+               }
+
+               const draftObj = {
+                  tempId: generateId(),
+                  date: new Date(year, month, day).toISOString(),
+                  origin: cleanDesc,
+                  amount: finalAmount,
+                  type,
+                  category,
+                  account: targetAccount,
+                  paymentMethod: getPaymentMethodForImport(type),
+                  tags: ['Fatura PDF'],
+                  isInstallment,
+                  installmentsTotal,
+                  currentInstallment,
+                  isShared: false,
                   rawLine: match[0]
-               });
+               };
+
+               const isDup = isDuplicate(draftObj);
+
+               if (isDup) {
+                  duplicatesRemoved++;
+               } else {
+                  parsedDrafts.push({
+                     ...draftObj,
+                     status: 'pending',
+                     rawLine: match[0]
+                  });
+               }
             }
-         }
 
-         setDuplicatesRemovedCount(duplicatesRemoved);
-         if (parsedDrafts.length === 0 && duplicatesRemoved === 0) throw new Error("Não identificamos transações no padrão Inter. Tente CSV.");
-         setDrafts(parsedDrafts);
-         setStep('review');
+            setDuplicatesRemovedCount(duplicatesRemoved);
+            if (parsedDrafts.length === 0 && duplicatesRemoved === 0) throw new Error("Não identificamos transações no padrão Inter. Tente CSV.");
+            setDrafts(parsedDrafts);
+            setStep('review');
 
-      } catch (e: any) {
-         if (e.message && (e.message.includes("Worker") || e.message.includes("pdf.worker"))) {
-            throw new Error("Erro no carregamento do PDF Worker. Tente recarregar a página.");
+         } catch (e: any) {
+            // If known PDF error
+            if (e.message && (e.message.includes("Worker") || e.message.includes("pdf.worker"))) {
+               throw new Error("Erro no carregamento do módulo PDF. Verifique sua conexão com a internet.");
+            }
+            throw e;
          }
-         throw new Error("Erro ao ler PDF: " + (e.message || "Formato desconhecido"));
-      }
+      })();
+
+      // Race Timeout vs Processing
+      await Promise.race([processingPromise, timeoutPromise]);
    };
 
    // --- ACTIONS ---
@@ -507,7 +561,7 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                   {/* Account Selector */}
                   <div className="mb-8 w-full max-w-md animate-in slide-in-from-top-4">
                      <label className="block text-sm text-zinc-400 mb-2 text-center">Selecione a Conta de Destino</label>
-                     <div className="relative">
+                     <div className="relative mb-4">
                         <select
                            value={targetAccount}
                            onChange={(e) => setTargetAccount(e.target.value)}
@@ -521,8 +575,23 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                            <CreditCard className="w-5 h-5" />
                         </div>
                      </div>
-                     <p className="text-xs text-zinc-500 text-center mt-2">
-                        Isso garante que datas de fechamento/vencimento sejam aplicadas corretamente.
+
+                     {/* Toggle Credit/Debit */}
+                     <div className="flex justify-center">
+                        <label className="flex items-center gap-3 cursor-pointer group p-2 rounded-lg hover:bg-white/5 transition-colors">
+                           <div className={`w-12 h-6 rounded-full p-1 transition-colors ${isCreditImport ? 'bg-primary' : 'bg-zinc-700'}`}>
+                              <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform ${isCreditImport ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                           </div>
+                           <input type="checkbox" className="hidden" checked={isCreditImport} onChange={e => setIsCreditImport(e.target.checked)} />
+                           <span className={`text-sm font-medium ${isCreditImport ? 'text-primary' : 'text-zinc-400'}`}>
+                              {isCreditImport ? 'Importar como Cartão de Crédito' : 'Importar como Débito/Conta'}
+                           </span>
+                        </label>
+                     </div>
+                     <p className="text-[10px] text-zinc-500 text-center mt-2">
+                        {isCreditImport
+                           ? "As datas serão projetadas para o vencimento da fatura."
+                           : "As transações serão lançadas na data da compra."}
                      </p>
                   </div>
 
@@ -797,6 +866,46 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                            <Save className="w-4 h-4" /> Salvar
                         </button>
                      </div>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {pdfWarningFile && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+               <div className="bg-surface border border-orange-500/30 w-full max-w-md rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-orange-500"></div>
+
+                  <div className="flex flex-col items-center text-center mb-6">
+                     <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mb-4">
+                        <AlertCircle className="w-8 h-8 text-orange-500" />
+                     </div>
+                     <h3 className="text-xl font-bold text-white mb-2">Atenção Aproximada</h3>
+                     <p className="text-zinc-300 text-sm">
+                        Nós <strong>não recomendamos</strong> o upload da fatura em PDF. Para garantir a funcionalidade completa e precisão do aplicativo, faça o lançamento manual.
+                     </p>
+                  </div>
+
+                  <div className="bg-zinc-900/50 rounded-xl p-4 mb-6 border border-zinc-800">
+                     <p className="text-xs text-zinc-400">
+                        <strong className="text-orange-400 block mb-1">Nota importante:</strong>
+                        A análise de PDF é visual e sujeita a erros de leitura. Se prosseguir, valide atentamente cada transação antes de confirmar a importação para evitar duplicidades ou valores incorretos.
+                     </p>
+                  </div>
+
+                  <div className="flex gap-3">
+                     <button
+                        onClick={() => setPdfWarningFile(null)}
+                        className="flex-1 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-medium transition-colors"
+                     >
+                        Cancelar
+                     </button>
+                     <button
+                        onClick={confirmPdfImport}
+                        className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-colors shadow-lg shadow-orange-500/20"
+                     >
+                        Entendi, continuar
+                     </button>
                   </div>
                </div>
             </div>
