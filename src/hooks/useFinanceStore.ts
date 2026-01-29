@@ -137,6 +137,13 @@ export const useFinanceStore = () => {
     setData(prev => ({ ...prev, budgets: prev.budgets.filter(b => b.id !== id) }));
   }, []);
 
+  const deleteAccountSettings = useCallback(async (accountId: string) => {
+    setData(prev => ({
+      ...prev,
+      accountSettings: prev.accountSettings.filter(a => a.accountId !== accountId)
+    }));
+  }, []);
+
   // Import Logic (Restored from Firebase version but local)
   const importCSV = useCallback(async (csvContent: string, defaultAccount: string = 'Inter') => {
     const lines = csvContent.split('\n');
@@ -199,7 +206,24 @@ export const useFinanceStore = () => {
     }
   };
 
-  const exportData = () => JSON.stringify(data, null, 2);
+  const exportData = () => {
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    // Format: zenith-backup-YYYY-MM-DD-HHmm.json
+    const fileName = `zenith-backup-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.json`;
+
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
   const togglePrivacy = () => setPrivacyMode(prev => !prev);
 
   return {
@@ -213,6 +237,7 @@ export const useFinanceStore = () => {
     updateGoal,
     addFundsToGoal,
     updateAccountSettings,
+    deleteAccountSettings,
     setBudget,
     deleteBudget,
     importCSV,

@@ -7,9 +7,10 @@ interface SmartBarProps {
   onAdd: (t: Omit<Transaction, 'id'>) => void;
   onOpenManual: () => void;
   history: Transaction[];
+  autoFocus?: boolean;
 }
 
-export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history }) => {
+export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history, autoFocus = false }) => {
   const [input, setInput] = useState('');
   const [preview, setPreview] = useState<Partial<Transaction> | null>(null);
   const [showCategorySelector, setShowCategorySelector] = useState(false);
@@ -25,7 +26,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
   };
 
   const methodKeywords: Record<string, string> = {
-    'credito': 'Crédito', 'crédito': 'Crédito', 
+    'credito': 'Crédito', 'crédito': 'Crédito',
     'debito': 'Débito', 'débito': 'Débito',
     'pix': 'Pix', 'dinheiro': 'Dinheiro'
   };
@@ -39,7 +40,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
   };
 
   const parseInput = (text: string) => {
-    
+
     if (!text.trim()) {
       setPreview(null);
       setShowCategorySelector(false);
@@ -48,21 +49,43 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
 
     let processText = text;
     let detectedType: 'income' | 'expense' = 'expense';
-    let detectedDate = new Date().toISOString(); 
+    let detectedDate = new Date().toISOString();
+    let detectedAmount: number | undefined = undefined;
 
     // 1. DATE DETECTION
-    const dateMatch = processText.match(/(?:dia\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i);
-    if (dateMatch) {
-      const day = parseInt(dateMatch[1]);
-      const month = parseInt(dateMatch[2]) - 1; 
+    const monthMap: Record<string, number> = {
+      'janeiro': 0, 'jan': 0, 'fevereiro': 1, 'fev': 1, 'março': 2, 'mar': 2,
+      'abril': 3, 'abr': 3, 'maio': 4, 'mai': 4, 'junho': 5, 'jun': 5,
+      'julho': 6, 'jul': 6, 'agosto': 7, 'ago': 7, 'setembro': 8, 'set': 8,
+      'outubro': 9, 'out': 9, 'novembro': 10, 'nov': 10, 'dezembro': 11, 'dez': 11
+    };
+
+    // Regex for "no dia 7 de março" (Consumes "no", "em", "do" prefix)
+    const verboseDateMatch = processText.match(/(?:(?:no|em|do)\s+)?(?:dia\s+)?(\d{1,2})\s+de\s+([a-zç]+)(?:\s+de\s+(\d{4}))?/i);
+    const numericDateMatch = processText.match(/(?:(?:no|em|do)\s+)?(?:dia\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i);
+
+    if (verboseDateMatch) {
+      const day = parseInt(verboseDateMatch[1]);
+      const monthStr = verboseDateMatch[2].toLowerCase();
+      const yearStr = verboseDateMatch[3];
+
+      if (monthMap[monthStr] !== undefined) {
+        let year = yearStr ? parseInt(yearStr) : new Date().getFullYear();
+        const newDate = new Date(year, monthMap[monthStr], day, 12, 0, 0);
+        detectedDate = newDate.toISOString();
+        processText = processText.replace(verboseDateMatch[0], '');
+      }
+    } else if (numericDateMatch) {
+      const day = parseInt(numericDateMatch[1]);
+      const month = parseInt(numericDateMatch[2]) - 1;
       let year = new Date().getFullYear();
-      if (dateMatch[3]) {
-        year = parseInt(dateMatch[3]);
-        if (year < 100) year += 2000; 
+      if (numericDateMatch[3]) {
+        year = parseInt(numericDateMatch[3]);
+        if (year < 100) year += 2000;
       }
       const newDate = new Date(year, month, day, 12, 0, 0);
       detectedDate = newDate.toISOString();
-      processText = processText.replace(dateMatch[0], '');
+      processText = processText.replace(numericDateMatch[0], '');
     }
 
     // 2. INSTALLMENT DETECTION
@@ -71,19 +94,33 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
 
     if (/recorrente/i.test(processText)) {
       isInstallment = true;
-      installmentsTotal = 12; 
+      installmentsTotal = 12;
       processText = processText.replace(/recorrente/i, '');
     }
 
-    const installmentMatch = processText.match(/(?:parcelado|em)?\s*(\d+)\s*(?:x|vezes|parcelas|meses)/i);
-    if (installmentMatch) {
+    // CHECK FOR SPECIFIC "10x de 50,00" SYNTAX FIRST (Implies Multiplication)
+    const installmentAndValueMatch = processText.match(/(\d+)\s*(?:x|vezes|parcelas)(?:\s+de)?\s*(?:R\$\s*)?(\d+(?:[.,]\d{1,2})?)/i);
+
+    if (installmentAndValueMatch) {
+      // We found "10x de 50". Use this to set BOTH.
       isInstallment = true;
-      installmentsTotal = parseInt(installmentMatch[1]);
-      processText = processText.replace(installmentMatch[0], '');
-    } else if (/parcelado/i.test(processText)) {
-       isInstallment = true;
-       installmentsTotal = installmentsTotal || 2; 
-       processText = processText.replace(/parcelado/i, '');
+      installmentsTotal = parseInt(installmentAndValueMatch[1]);
+      const partValue = parseFloat(installmentAndValueMatch[2].replace(',', '.'));
+      detectedAmount = partValue * installmentsTotal;
+      processText = processText.replace(installmentAndValueMatch[0], '');
+    } else {
+      // Standard standalone installment check
+      const installmentMatch = processText.match(/(?:parcelado|em)?\s*(\d+)\s*(?:x|vezes|parcelas|meses)/i);
+      if (installmentMatch) {
+        isInstallment = true;
+        installmentsTotal = parseInt(installmentMatch[1]);
+        processText = processText.replace(installmentMatch[0], '');
+      } else if (/parcelado/i.test(processText)) {
+        // Standard 2x fallback
+        isInstallment = true;
+        installmentsTotal = installmentsTotal || 2;
+        // Disabled removal to keep "Parcelado" in title
+      }
     }
 
     // 3. TYPE DETECTION
@@ -93,28 +130,32 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
         detectedType = 'income';
         const regex = new RegExp(`\\b${kw}\\b`, 'gi');
         processText = processText.replace(regex, '');
-        break; 
+        break;
       }
     }
     if (lowerTextRaw.includes('pix recebido')) {
-       detectedType = 'income';
-       processText = processText.replace(/recebido/gi, ''); 
+      detectedType = 'income';
+      processText = processText.replace(/recebido/gi, '');
     }
 
-    // 4. AMOUNT DETECTION
-    const amountMatch = processText.match(/(\d+(?:[.,]\d{1,2})?)/);
-    if (!amountMatch) {
+    // 4. AMOUNT DETECTION (Consume "de", "por", "valor" prefix)
+    if (detectedAmount === undefined) {
+      const amountMatch = processText.match(/(?:de|por|valor)?\s*(?:R\$\s*)?(\d+(?:[.,]\d{1,2})?)/i);
+      if (amountMatch) {
+        const rawAmount = amountMatch[1].replace(',', '.');
+        detectedAmount = parseFloat(rawAmount);
+        processText = processText.replace(amountMatch[0], '')
+          .replace(/\breais\b/gi, '')
+          .trim();
+      }
+    }
+
+    if (detectedAmount === undefined) {
       setPreview(null);
       return;
     }
 
-    const rawAmount = amountMatch[1].replace(',', '.');
-    const amount = parseFloat(rawAmount);
-
-    processText = processText.replace(amountMatch[0], '')
-                             .replace(/\breais\b/gi, '')
-                             .replace(/\br\$\b/gi, '')
-                             .trim();
+    const amount = detectedAmount!;
 
     // 5. TAGS DETECTION
     const tags: string[] = [];
@@ -127,28 +168,28 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
     }
 
     // 6. ACCOUNT & METHOD DETECTION
-    const normalizedText = processText.replace(/[.,;](?=\s|$)/g, ' '); 
+    const normalizedText = processText.replace(/[.,;](?=\s|$)/g, ' ');
     const tokens = normalizedText.split(/\s+/);
 
-    let detectedAccount = 'Inter'; 
-    let detectedMethod = ''; 
+    let detectedAccount = 'Inter';
+    let detectedMethod = '';
     let isShared = false;
 
     const titleTokens: string[] = [];
     tokens.forEach(token => {
       if (!token) return;
       const lower = token.toLowerCase();
-      
+
       if (splitKeywords.includes(lower)) {
         isShared = true;
-        return; 
+        return;
       }
-      
+
       if (accountKeywords[lower]) {
         detectedAccount = accountKeywords[lower];
-        return; 
+        return;
       }
-      
+
       if (methodKeywords[lower]) {
         detectedMethod = methodKeywords[lower];
       }
@@ -156,34 +197,36 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
     });
 
     if (!detectedMethod) {
-       if (detectedAccount === 'Carteira') detectedMethod = 'Dinheiro';
-       else if (detectedType === 'expense') detectedMethod = 'Crédito'; 
-       else detectedMethod = 'Pix'; 
+      if (detectedAccount === 'Carteira') detectedMethod = 'Dinheiro';
+      else if (detectedType === 'expense') detectedMethod = 'Crédito';
+      else detectedMethod = 'Pix';
     }
 
     // 7. CLEAN UP ORIGIN
-    let origin = titleTokens.join(' ').trim();
-    origin = origin.replace(/^(de|da|do|para|em)\s+/i, '');
+    // Remove stranded connectors
+    const connectors = ['de', 'da', 'do', 'no', 'na', 'em', 'por', 'valor'];
+    let origin = titleTokens.filter(t => !connectors.includes(t.toLowerCase())).join(' ').trim();
+
     if (!origin) origin = detectedType === 'income' ? 'Receita' : 'Nova Transação';
     origin = capitalizeFirstLetter(origin);
 
     // 8. CATEGORY INFERENCE (Using Shared Utility + History)
     let category = 'Outros';
-    
+
     // Bidirectional Check: "Uber" matches "Uber Viagem" AND "Uber Viagem" matches "Uber"
-    const lastSimilar = history.find(t => 
-      t.origin.toLowerCase().includes(origin.toLowerCase()) || 
+    const lastSimilar = history.find(t =>
+      t.origin.toLowerCase().includes(origin.toLowerCase()) ||
       origin.toLowerCase().includes(t.origin.toLowerCase())
     );
-    
+
     if (lastSimilar) {
       category = lastSimilar.category;
     } else {
-       if (detectedType === 'income') {
-           category = origin.toLowerCase().includes('salário') ? 'Salário' : 'Outros';
-       } else {
-           category = inferCategory(origin);
-       }
+      if (detectedType === 'income') {
+        category = origin.toLowerCase().includes('salário') ? 'Salário' : 'Outros';
+      } else {
+        category = inferCategory(origin);
+      }
     }
 
     setPreview(prev => ({
@@ -236,18 +279,18 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
 
   return (
     <div className="w-full max-w-3xl mx-auto mb-8 relative z-50">
-      <div 
+      <div
         className={`
           relative flex items-center w-full bg-surface border rounded-full shadow-2xl shadow-black/40 transition-all duration-300
           ${isFocused || input.length > 0 ? 'border-primary ring-4 ring-primary/10 scale-[1.01]' : 'border-zinc-800 hover:border-zinc-700'}
         `}
       >
         <div className={`pl-5 transition-colors duration-300 ${isFocused ? 'text-primary animate-pulse' : 'text-zinc-500'}`}>
-           {preview ? (
-             preview.type === 'income' ? <TrendingUp className="w-5 h-5 text-secondary" /> : <DollarSign className="w-5 h-5 text-danger" />
-           ) : (
-             <Sparkles className="w-5 h-5" />
-           )}
+          {preview ? (
+            preview.type === 'income' ? <TrendingUp className="w-5 h-5 text-secondary" /> : <DollarSign className="w-5 h-5 text-danger" />
+          ) : (
+            <Sparkles className="w-5 h-5" />
+          )}
         </div>
         <form onSubmit={handleSubmit} className="flex-1">
           <input
@@ -258,33 +301,34 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
             value={input}
             onChange={handleChange}
             onFocus={() => setIsFocused(true)}
+            autoFocus={autoFocus}
             onBlur={() => setIsFocused(false)}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
-                 setShowCategorySelector(false);
-                 inputRef.current?.blur();
+                setShowCategorySelector(false);
+                inputRef.current?.blur();
               }
             }}
           />
         </form>
         <div className="flex items-center pr-2 gap-1">
-           <div className={`transition-all duration-300 overflow-hidden ${preview ? 'w-10 opacity-100 scale-100' : 'w-0 opacity-0 scale-90'}`}>
-              <button 
-                onClick={handleSubmit}
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
-                title="Confirmar (Enter)"
-              >
-                 <ArrowRight className="w-5 h-5" />
-              </button>
-           </div>
-           <div className="w-px h-6 bg-zinc-800 mx-2"></div>
-           <button 
-             onClick={onOpenManual}
-             className="group flex items-center justify-center w-10 h-10 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all active:scale-95"
-             title="Adicionar Manualmente"
-           >
-             <Plus className="w-6 h-6 group-hover:rotate-90 transition-transform duration-300" />
-           </button>
+          <div className={`transition-all duration-300 overflow-hidden ${preview ? 'w-10 opacity-100 scale-100' : 'w-0 opacity-0 scale-90'}`}>
+            <button
+              onClick={handleSubmit}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
+              title="Confirmar (Enter)"
+            >
+              <ArrowRight className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="w-px h-6 bg-zinc-800 mx-2"></div>
+          <button
+            onClick={onOpenManual}
+            className="group flex items-center justify-center w-10 h-10 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all active:scale-95"
+            title="Adicionar Manualmente"
+          >
+            <Plus className="w-6 h-6 group-hover:rotate-90 transition-transform duration-300" />
+          </button>
         </div>
       </div>
 
@@ -292,36 +336,35 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
         <div className="absolute top-full left-4 right-4 mt-2 bg-surfaceHighlight border border-zinc-700 rounded-2xl p-4 shadow-2xl animate-in fade-in slide-in-from-top-2 z-40 backdrop-blur-xl bg-opacity-95">
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
-               <div className="flex flex-col">
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
-                     {new Date(preview.date!).toLocaleDateString('pt-BR')}
+              <div className="flex flex-col">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
+                  {new Date(preview.date!).toLocaleDateString('pt-BR')}
+                </span>
+                <div className="flex items-center gap-3 text-sm text-zinc-300">
+                  <span className={`font-bold text-xl tracking-tight ${preview.type === 'income' ? 'text-secondary' : 'text-danger'}`}>
+                    {preview.type === 'income' ? '+' : '-'}{preview.amount?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </span>
-                  <div className="flex items-center gap-3 text-sm text-zinc-300">
-                      <span className={`font-bold text-xl tracking-tight ${preview.type === 'income' ? 'text-secondary' : 'text-danger'}`}>
-                        {preview.type === 'income' ? '+' : '-'}{preview.amount?.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                      </span>
-                      <span className="font-medium text-white text-lg">{preview.origin}</span>
-                  </div>
-               </div>
-               {preview.isShared && (
-                  <span className="flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider bg-blue-500/10 text-blue-400 px-2 py-1 rounded-full border border-blue-500/20">
-                     <Users className="w-3 h-3" /> Split
-                  </span>
-                )}
+                  <span className="font-medium text-white text-lg">{preview.origin}</span>
+                </div>
+              </div>
+              {preview.isShared && (
+                <span className="flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider bg-blue-500/10 text-blue-400 px-2 py-1 rounded-full border border-blue-500/20">
+                  <Users className="w-3 h-3" /> Split
+                </span>
+              )}
             </div>
-            
+
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <div className="relative">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowCategorySelector(!showCategorySelector)}
-                  className={`flex items-center gap-1 px-3 py-1.5 rounded-full border transition-colors font-medium ${
-                    preview.category === 'Outros' 
-                      ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30 hover:bg-yellow-500/20' 
-                      : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:border-zinc-600'
-                  }`}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-full border transition-colors font-medium ${preview.category === 'Outros'
+                    ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30 hover:bg-yellow-500/20'
+                    : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white hover:border-zinc-600'
+                    }`}
                 >
-                  {preview.category} <ChevronDown className="w-3 h-3"/>
+                  {preview.category} <ChevronDown className="w-3 h-3" />
                 </button>
                 {showCategorySelector && (
                   <div className="absolute top-full left-0 mt-2 w-48 bg-surface border border-zinc-700 rounded-xl shadow-xl p-2 grid grid-cols-1 gap-1 max-h-48 overflow-y-auto z-[60]">
@@ -342,17 +385,17 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
                 {preview.account} {preview.paymentMethod && ` • ${preview.paymentMethod}`}
               </span>
               {preview.isInstallment && (
-                 <div className="flex items-center gap-1 bg-zinc-800 border border-zinc-700 rounded-full px-3 py-1.5 text-orange-400 font-medium">
-                    <Layers className="w-3 h-3" />
-                    <input 
-                       type="number" min="2"
-                       className="w-6 bg-transparent text-center focus:outline-none focus:text-white text-orange-400 font-bold p-0"
-                       value={preview.installmentsTotal}
-                       onChange={(e) => setPreview({...preview, installmentsTotal: parseInt(e.target.value)})}
-                       onClick={(e) => e.stopPropagation()}
-                    />
-                    <span>x</span>
-                 </div>
+                <div className="flex items-center gap-1 bg-zinc-800 border border-zinc-700 rounded-full px-3 py-1.5 text-orange-400 font-medium">
+                  <Layers className="w-3 h-3" />
+                  <input
+                    type="number" min="2"
+                    className="w-6 bg-transparent text-center focus:outline-none focus:text-white text-orange-400 font-bold p-0"
+                    value={preview.installmentsTotal}
+                    onChange={(e) => setPreview({ ...preview, installmentsTotal: parseInt(e.target.value) })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span>x</span>
+                </div>
               )}
               {preview.tags && preview.tags.length > 0 && (
                 <span className="flex items-center gap-1 text-primary px-3 py-1.5 bg-primary/10 border border-primary/20 rounded-full font-medium">
@@ -363,7 +406,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
           </div>
           <div className="mt-3 pt-3 border-t border-zinc-800/50 flex justify-between items-center text-[10px] text-zinc-500 uppercase tracking-widest font-medium">
             <span>AI Detected</span>
-            <span className="flex items-center gap-1">Enter to save <ArrowRight className="w-3 h-3"/></span>
+            <span className="flex items-center gap-1">Enter to save <ArrowRight className="w-3 h-3" /></span>
           </div>
         </div>
       )}

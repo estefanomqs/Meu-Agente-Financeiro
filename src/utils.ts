@@ -208,40 +208,64 @@ export const getActiveInstallmentIndex = (t: Transaction, targetDate: Date): num
   return null;
 };
 
-// Credit Card Logic: Calculates the actual cash flow date based on Closing/Due Day
+// Helper to handle short months (Example: Feb 30 -> Feb 28/29)
+export const clampDate = (year: number, month: number, day: number): Date => {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const safeDay = Math.min(day, daysInMonth);
+  return new Date(year, month, safeDay);
+};
+
+// Credit Card Logic: Refactored for absolute precision
+// Rules:
+// 1. Reference Cycle:
+//    - Purchase Day < Closing Day -> Belongs to "Current" Cycle (Closing Date in current month).
+//    - Purchase Day >= Closing Day -> Belongs to "Next" Cycle (Closing Date in next month).
+// 2. Payment Date:
+//    - The Due Date follows the Closing Date.
+//    - If Due Day < Closing Day (e.g. Close 25, Due 5), the Due Date is in the MONTH FOLLOWING the Closing Date.
+//    - If Due Day >= Closing Day (e.g. Close 1, Due 10), the Due Date is in the SAME MONTH as the Closing Date (rare but possible).
+// 3. Edge Cases:
+//    - Year Rollover (Dec -> Jan).
+//    - February (Avoid Feb 30).
 export const getEstimatedPaymentDate = (transactionDate: string, settings?: AccountSettings): Date => {
   const tDate = new Date(transactionDate);
+  if (!settings) return tDate; // Debit logic
 
-  if (!settings) return tDate; // No settings = debit logic (immediate)
+  const purchaseDay = tDate.getDate();
+  const closingDay = settings.closingDay;
+  const dueDay = settings.dueDay;
 
-  const closingDate = new Date(tDate.getFullYear(), tDate.getMonth(), settings.closingDay);
+  // 1. Determine the "Cycle Month" (The month the bill closes)
+  let year = tDate.getFullYear();
+  let month = tDate.getMonth(); // 0-11
 
-  // If transaction is AFTER closing day, it goes to next month's bill
-  if (tDate.getDate() > settings.closingDay) {
-    // Due date is in the NEXT month
-    // Note: This is simplified. Real logic handles year rollover.
-    const dueDate = new Date(tDate.getFullYear(), tDate.getMonth() + 1, settings.dueDay);
-    return dueDate;
-  } else {
-    // Due date is THIS month (or next, depending on if Due Day < Closing Day which is rare but possible)
-    // Standard logic: bought before closing -> pay on this month's due date
-    let dueDate = new Date(tDate.getFullYear(), tDate.getMonth(), settings.dueDay);
-
-    // Safety: If Due Day is smaller than Closing day (e.g. Closing 5, Due 1), it usually means Due is next month actually
-    // But usually Closing ~25th, Due ~5th (next month).
-    // Let's assume standard: Closing Day X, Due Day Y (Y usually > X or Y is early next month)
-
-    // Better Logic:
-    // If we are BEFORE closing, we pay on the UPCOMING due day.
-    // If today is 15th, closing is 20th, due is 27th -> pay 27th.
-    // If today is 15th, closing is 20th, due is 5th (next month) -> pay 5th next month.
-
-    if (settings.dueDay < settings.closingDay) {
-      dueDate = new Date(tDate.getFullYear(), tDate.getMonth() + 1, settings.dueDay);
+  if (purchaseDay >= closingDay) {
+    // Pushes to next cycle
+    month++;
+    // Handle Year Rollover
+    if (month > 11) {
+      month = 0;
+      year++;
     }
-
-    return dueDate;
   }
+
+  // At this point, [year, month] is the month the bill CLOSES.
+  // Now determine Due Date relative to this Closing Month.
+
+  let dueYear = year;
+  let dueMonth = month;
+
+  if (dueDay < closingDay) {
+    // If Due Day is before Closing Day, it must be the NEXT month relative to the closing date.
+    dueMonth++;
+    if (dueMonth > 11) {
+      dueMonth = 0;
+      dueYear++;
+    }
+  }
+
+  // 2. Safe Date Creation using Clamp Logic
+  return clampDate(dueYear, dueMonth, dueDay);
 };
 
 // Centralized logic to get all installment dates for a transaction

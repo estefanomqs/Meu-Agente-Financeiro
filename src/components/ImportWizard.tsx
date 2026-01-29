@@ -38,8 +38,8 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
    // New: Account Selection State
    const [targetAccount, setTargetAccount] = useState('Inter');
 
-   // Get Settings from Store
-   const { data: { accountSettings } } = useFinanceStore();
+   // Get Settings & Transactions from Store
+   const { data: { accountSettings, transactions: existingTransactions } } = useFinanceStore();
 
    // Selection State
    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -52,12 +52,35 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
    const [editForm, setEditForm] = useState<Partial<DraftTransaction>>({});
    const [editAmountDisplay, setEditAmountDisplay] = useState('');
 
+   // Stats State
+   const [duplicatesRemovedCount, setDuplicatesRemovedCount] = useState(0);
+
    // Handle immediate processing if pendingFile exists
    useEffect(() => {
       if (isOpen && pendingFile) {
          processFile(pendingFile);
       }
    }, [isOpen, pendingFile]);
+
+   // --- DEDUPLICATION HELPER ---
+   const isDuplicate = (draft: Partial<Transaction>) => {
+      // Create a signature for the draft
+      // Match: Date (YYYY-MM-DD), Amount (Exact), Origin (Rough string match)
+      if (!draft.date || draft.amount === undefined || !draft.origin) return false;
+
+      const draftDate = draft.date.split('T')[0];
+      const draftAmount = draft.amount;
+      const draftOrigin = draft.origin.toLowerCase().trim();
+
+      return existingTransactions.some(existing => {
+         const existingDate = existing.date.split('T')[0];
+         // Allow tiny floating point diff
+         const amountMatch = Math.abs(existing.amount - draftAmount) < 0.01;
+         const originMatch = existing.origin.toLowerCase().trim() === draftOrigin;
+
+         return existingDate === draftDate && amountMatch && originMatch;
+      });
+   };
 
    // --- SAFE CLOSE HANDLER ---
    // Garante que tudo seja resetado ao sair, evitando bugs visuais na reabertura
@@ -76,6 +99,7 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
       // LIMPEZA FORÇADA: Zera qualquer estado anterior antes de começar
       setDrafts([]);
       setSelectedIds(new Set());
+      setDuplicatesRemovedCount(0);
       setError(null);
       setLoading(true);
 
@@ -145,6 +169,7 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                }
 
                const parsedDrafts: DraftTransaction[] = [];
+               let duplicatesRemoved = 0;
 
                for (let i = headerRowIdx + 1; i < rows.length; i++) {
                   const row = rows[i];
@@ -193,9 +218,8 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
 
                   const category = inferCategory(origin);
 
-                  parsedDrafts.push({
+                  const draftObj = {
                      tempId: generateId(),
-                     status: 'pending',
                      date: dateStr,
                      origin: origin.charAt(0).toUpperCase() + origin.slice(1),
                      amount: amountVal,
@@ -206,9 +230,22 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                      tags: ['Importado'],
                      isInstallment: false,
                      isShared: false
-                  });
+                  };
+
+                  const isDup = isDuplicate(draftObj);
+
+                  if (isDup) {
+                     duplicatesRemoved++;
+                  } else {
+                     parsedDrafts.push({
+                        ...draftObj,
+                        status: 'pending',
+                        rawLine: (rawDesc || 'Transação Importada')
+                     });
+                  }
                }
 
+               setDuplicatesRemovedCount(duplicatesRemoved);
                setDrafts(parsedDrafts);
                setStep('review');
                resolve();
@@ -242,6 +279,7 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
          };
 
          const parsedDrafts: DraftTransaction[] = [];
+         let duplicatesRemoved = 0;
          const regexInter = /(\d{1,2})\s+de\s+([a-zç]{3,})\.?\s+(\d{4})\s+(.*?)\s+-\s+(?:R\$\s*)?(-?[\d\.,]+)/gi;
 
          let match;
@@ -292,9 +330,8 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                finalAmount = finalAmount * installmentsTotal;
             }
 
-            parsedDrafts.push({
+            const draftObj = {
                tempId: generateId(),
-               status: 'pending',
                date: new Date(year, month, day).toISOString(),
                origin: cleanDesc,
                amount: finalAmount,
@@ -308,10 +345,23 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                currentInstallment,
                isShared: false,
                rawLine: match[0]
-            });
+            };
+
+            const isDup = isDuplicate(draftObj);
+
+            if (isDup) {
+               duplicatesRemoved++;
+            } else {
+               parsedDrafts.push({
+                  ...draftObj,
+                  status: 'pending',
+                  rawLine: match[0]
+               });
+            }
          }
 
-         if (parsedDrafts.length === 0) throw new Error("Não identificamos transações no padrão Inter. Tente CSV.");
+         setDuplicatesRemovedCount(duplicatesRemoved);
+         if (parsedDrafts.length === 0 && duplicatesRemoved === 0) throw new Error("Não identificamos transações no padrão Inter. Tente CSV.");
          setDrafts(parsedDrafts);
          setStep('review');
 
@@ -540,6 +590,20 @@ export const ImportWizard: React.FC<Props> = ({ isOpen, onClose, onFinishImport,
                         <span className="flex items-center gap-1 text-zinc-500 line-through decoration-danger">Rejeitado</span>
                      </div>
                   </div>
+
+                  {duplicatesRemovedCount > 0 && (
+                     <div className="mx-4 mt-4 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl flex items-start gap-3 animate-in slide-in-from-top-2">
+                        <div className="p-2 bg-orange-500/20 rounded-lg shrink-0">
+                           <AlertCircle className="w-5 h-5 text-orange-400" />
+                        </div>
+                        <div>
+                           <h4 className="text-sm font-bold text-orange-200">Limpeza Automática Realizada</h4>
+                           <p className="text-xs text-orange-300/80 mt-1">
+                              Identificamos e removemos <strong className="text-orange-200">{duplicatesRemovedCount} transações</strong> que já constavam no seu histórico para evitar duplicidade.
+                           </p>
+                        </div>
+                     </div>
+                  )}
 
                   <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                      {drafts.map((d, idx) => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, CreditCard, Calendar, Target, PieChart as PieIcon, LogOut } from 'lucide-react';
+import { LayoutDashboard, CreditCard, Calendar, Target, PieChart as PieIcon, LogOut, Plus as PlusIcon } from 'lucide-react';
 import { ViewState } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -10,7 +10,7 @@ interface NavProps {
 
 export const Sidebar: React.FC<NavProps> = ({ view, setView }) => {
   const { logout } = useAuth();
-  
+
   const items: { id: ViewState, icon: any, label: string }[] = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Resumo' },
     { id: 'transactions', icon: CreditCard, label: 'Extrato' },
@@ -30,19 +30,18 @@ export const Sidebar: React.FC<NavProps> = ({ view, setView }) => {
           <button
             key={item.id}
             onClick={() => setView(item.id)}
-            className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${
-              view === item.id 
-                ? 'bg-primary/10 text-primary font-medium' 
-                : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-white'
-            }`}
+            className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${view === item.id
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-white'
+              }`}
           >
             <item.icon className="w-5 h-5" />
             <span className="hidden md:block">{item.label}</span>
           </button>
         ))}
       </div>
-      
-      <button 
+
+      <button
         onClick={logout}
         className="w-full flex items-center gap-3 p-3 rounded-xl text-zinc-500 hover:bg-red-500/10 hover:text-red-400 transition-all mt-auto"
       >
@@ -53,12 +52,56 @@ export const Sidebar: React.FC<NavProps> = ({ view, setView }) => {
   );
 };
 
-export const MobileNav: React.FC<NavProps> = ({ view, setView }) => {
+interface MobileNavProps extends NavProps {
+  onOpenActionSheet: () => void;
+}
+
+export const MobileNav: React.FC<MobileNavProps> = ({ view, setView, onOpenActionSheet }) => {
   return (
-    <div className="md:hidden fixed bottom-0 left-0 w-full bg-surface border-t border-zinc-800 p-4 flex justify-around z-50">
-       <button onClick={() => setView('dashboard')} className={view === 'dashboard' ? 'text-primary' : 'text-zinc-500'}><LayoutDashboard /></button>
-       <button onClick={() => setView('transactions')} className={view === 'transactions' ? 'text-primary' : 'text-zinc-500'}><CreditCard /></button>
-       <button onClick={() => setView('budgets')} className={view === 'budgets' ? 'text-primary' : 'text-zinc-500'}><PieIcon /></button>
-    </div>
+    <>
+      {/* Spacer to prevent content from being hidden behind dock */}
+      <div className="h-24 md:hidden" />
+
+      <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-surface/80 backdrop-blur-xl border border-white/5 rounded-2xl shadow-2xl p-2 px-6 flex items-center justify-between z-50 ring-1 ring-white/10">
+        <button
+          onClick={() => setView('dashboard')}
+          className={`p-3 rounded-xl transition-all ${view === 'dashboard' ? 'text-primary bg-primary/10' : 'text-zinc-500 hover:text-white'}`}
+        >
+          <LayoutDashboard className="w-6 h-6" />
+        </button>
+
+        <button
+          onClick={() => setView('transactions')}
+          className={`p-3 rounded-xl transition-all ${view === 'transactions' ? 'text-primary bg-primary/10' : 'text-zinc-500 hover:text-white'}`}
+        >
+          <CreditCard className="w-6 h-6" />
+        </button>
+
+        {/* Central Action Button */}
+        <div className="-mt-8 relative group">
+          <div className="absolute inset-0 bg-primary/40 blur-xl rounded-full group-hover:bg-primary/60 transition-all"></div>
+          <button
+            onClick={onOpenActionSheet}
+            className="relative w-14 h-14 bg-primary text-white rounded-2xl flex items-center justify-center shadow-lg shadow-primary/30 hover:scale-105 active:scale-95 transition-all"
+          >
+            <PlusIcon className="w-7 h-7" />
+          </button>
+        </div>
+
+        <button
+          onClick={() => setView('budgets')}
+          className={`p-3 rounded-xl transition-all ${view === 'budgets' ? 'text-primary bg-primary/10' : 'text-zinc-500 hover:text-white'}`}
+        >
+          <PieIcon className="w-6 h-6" />
+        </button>
+
+        <button
+          onClick={() => setView('goals')}
+          className={`p-3 rounded-xl transition-all ${view === 'goals' ? 'text-primary bg-primary/10' : 'text-zinc-500 hover:text-white'}`}
+        >
+          <Target className="w-6 h-6" />
+        </button>
+      </div>
+    </>
   );
 };
