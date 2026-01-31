@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
-import { FileSpreadsheet, MessageCircle, CheckSquare, Square, Trash2, Search, Filter, Tag, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import React, { useState, useMemo, useLayoutEffect, useRef } from 'react';
+import { FileSpreadsheet, MessageCircle, CheckSquare, Square, Trash2, Search, Filter, Tag, ChevronLeft, ChevronRight, Calendar, BarChart as BarChartIcon } from 'lucide-react';
 import { BarChart, Bar, Cell, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Transaction, AppData } from '../types';
-import { getEffectiveAmount, getInstallmentValue, ACCOUNTS, CATEGORIES, formatCurrency } from '../utils';
+import { getEffectiveAmount, getInstallmentValue, getEstimatedPaymentDate, formatCurrency } from '../utils'; // <--- Garanta que getEstimatedPaymentDate está importado
 import { TransactionRow } from '../components/TransactionRow';
 
 interface TransactionsViewProps {
@@ -46,22 +46,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       return list;
    }, []);
 
-   // 2. Filtros Rápidos Unificados (Tags + Categorias)
+   // 2. Extrai Tags Únicas (Smart Tags)
    const uniqueTags = useMemo(() => {
-      const items = new Set<string>();
-      const blacklist = ['Fatura PDF', 'Importação PDF', 'Sistema', 'Recorrência', 'Parcelamento', 'Outros']; // Adicionei Outros se desejar
-
+      const tags = new Set<string>();
       data.transactions.forEach(t => {
-         // Coleta Tags
-         t.tags?.forEach(tag => {
-            if (!blacklist.includes(tag)) items.add(tag);
-         });
-         // Coleta Categoria
-         if (t.category && !blacklist.includes(t.category)) {
-            items.add(t.category);
-         }
+         t.tags?.forEach(tag => tags.add(tag));
       });
-      return Array.from(items).sort();
+      return Array.from(tags).sort();
    }, [data.transactions]);
 
    // Auto-scroll e Centralização do Mês Selecionado (Native API + RAF)
@@ -97,27 +88,28 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
    }, [currentDate, monthsList]);
 
+   // --- HELPER DE DATA REAL ---
+   // Essa função decide qual data usar para exibir no extrato
+   const getDisplayDate = (t: Transaction): Date => {
+      // 1. Se NÃO for Crédito, a data é SEMPRE a data original (compra)
+      if (t.paymentMethod !== 'Crédito') {
+         return new Date(t.date);
+      }
+
+      // 2. Se for Crédito, tentamos calcular a data da fatura
+      const settings = data.accountSettings.find(a => a.accountId === t.account);
+      if (settings) {
+         return getEstimatedPaymentDate(t.date, settings);
+      }
+
+      // 3. Fallback: Data original
+      return new Date(t.date);
+   };
+
    // 3. Dados do Gráfico (Panorama de 6 meses)
    const chartData = useMemo(() => {
       // Mapa: "YYYY-MM" -> Total
       const totals: Record<string, number> = {};
-
-      // Helper: Calcula Data de Competência (Fatura do Cartão) - Duplicado para manter isolamento do hook
-      const getCompetenceDate = (t: Transaction, originalDate: Date): Date => {
-         // Só aplica regra de fechamento para despesas no Crédito (ou bancos específicos)
-         if (t.type === 'expense' && (t.paymentMethod === 'Credit' || ['Nubank', 'Inter'].includes(t.account))) {
-            const settings = data.accountSettings.find(a => a.accountId === t.account);
-            if (settings && settings.closingDay) {
-               if (originalDate.getDate() >= settings.closingDay) {
-                  const competence = new Date(originalDate);
-                  competence.setMonth(competence.getMonth() + 1);
-                  competence.setDate(1);
-                  return competence;
-               }
-            }
-         }
-         return originalDate;
-      };
 
       // Inicializa 6 meses em volta da data atual
       const rangeStart = new Date(currentDate);
@@ -126,27 +118,25 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       rangeEnd.setMonth(rangeEnd.getMonth() + 3);
 
       data.transactions.forEach(t => {
-         // Logica de projeção + Competência
+         // Logica de projeção para o gráfico
          if (!t.isInstallment) {
-            const tDate = new Date(t.date);
-            const compDate = getCompetenceDate(t, tDate); // Usa data de competência
-
+            const tDate = getDisplayDate(t); // <--- USA O HELPER CORRIGIDO
             if (t.type === 'expense') {
-               const key = `${compDate.getFullYear()}-${compDate.getMonth()}`;
+               const key = `${tDate.getFullYear()}-${tDate.getMonth()}`;
                totals[key] = (totals[key] || 0) + getEffectiveAmount(t);
             }
          } else {
             const total = t.installmentsTotal || 1;
-            const tDate = new Date(t.date);
+            // Para parcelas, a primeira data segue a regra do cartão
+            const firstDate = getDisplayDate(t);
             const val = getInstallmentValue(t);
-            for (let i = 0; i < total; i++) {
-               const instDate = new Date(tDate);
-               instDate.setMonth(tDate.getMonth() + i);
 
-               const compDate = getCompetenceDate(t, instDate); // Usa data de competência
+            for (let i = 0; i < total; i++) {
+               const instDate = new Date(firstDate);
+               instDate.setMonth(firstDate.getMonth() + i);
 
                if (t.type === 'expense') {
-                  const key = `${compDate.getFullYear()}-${compDate.getMonth()}`;
+                  const key = `${instDate.getFullYear()}-${instDate.getMonth()}`;
                   totals[key] = (totals[key] || 0) + val;
                }
             }
@@ -167,7 +157,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
          });
       }
       return dataPoints;
-   }, [data.transactions, currentDate, data.accountSettings]);
+   }, [data.transactions, currentDate]);
 
 
    // 4. Transações do Mês Selecionado (Listing)
@@ -176,26 +166,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
       end.setHours(23, 59, 59, 999);
 
-      let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number, displayDate: number }[] = [];
+      let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number }[] = [];
       const searchLower = searchTerm.toLowerCase();
-
-      // Helper: Calcula Data de Competência (Fatura do Cartão)
-      const calculateCompetenceDate = (t: Transaction, originalDate: Date): Date => {
-         // Só aplica regra de fechamento para despesas no Crédito (ou bancos específicos se desejado)
-         if (t.type === 'expense' && (t.paymentMethod === 'Credit' || ['Nubank', 'Inter'].includes(t.account))) {
-            const settings = data.accountSettings.find(a => a.accountId === t.account);
-            if (settings && settings.closingDay) {
-               if (originalDate.getDate() >= settings.closingDay) {
-                  // Joga para o próximo mês (Mês da Fatura)
-                  const competence = new Date(originalDate);
-                  competence.setMonth(competence.getMonth() + 1);
-                  competence.setDate(1); // Normaliza para evitar edge cases de dias 31
-                  return competence;
-               }
-            }
-         }
-         return originalDate;
-      };
 
       data.transactions.forEach(t => {
          // Search Filter
@@ -204,46 +176,35 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             t.category.toLowerCase().includes(searchLower) ||
             (t.tags && t.tags.some(tag => tag.toLowerCase().includes(searchLower)));
 
-         // Quick Filter (Tag OR Category)
-         const matchesTag = !selectedTag ||
-            (t.tags && t.tags.includes(selectedTag)) ||
-            t.category === selectedTag;
+         // Tag Filter
+         const matchesTag = !selectedTag || (t.tags && t.tags.includes(selectedTag));
 
          if (!matchesSearch || !matchesTag) return;
          if (filterCategory !== 'Todas' && t.category !== filterCategory) return;
          if (filterAccount !== 'Todos' && t.account !== filterAccount) return;
 
-         // Date Projection Check (Usando Competência)
+         // --- PROJECTION CHECK CORRIGIDO ---
          if (!t.isInstallment) {
-            const tDate = new Date(t.date);
-            const competenceDate = calculateCompetenceDate(t, tDate);
+            const tDate = getDisplayDate(t); // <--- USA O HELPER QUE RESPEITA DÉBITO
 
-            if (competenceDate >= start && competenceDate <= end) {
-               rawList.push({
-                  t,
-                  isGhost: false,
-                  sortDate: competenceDate.getTime(),
-                  displayDate: tDate.getTime()
-               });
+            if (tDate >= start && tDate <= end) {
+               rawList.push({ t, isGhost: false, sortDate: tDate.getTime() });
             }
          } else {
             const total = t.installmentsTotal || 1;
-            const tDate = new Date(t.date);
+            const firstDate = getDisplayDate(t); // <--- USA O HELPER
+
             for (let i = 0; i < total; i++) {
-               const instDate = new Date(tDate);
-               instDate.setMonth(tDate.getMonth() + i);
+               const instDate = new Date(firstDate);
+               instDate.setMonth(firstDate.getMonth() + i);
 
-               // Aplica regra de competência em CADA parcela
-               const competenceDate = calculateCompetenceDate(t, instDate);
-
-               if (competenceDate >= start && competenceDate <= end) {
+               if (instDate >= start && instDate <= end) {
                   rawList.push({
                      t,
                      isGhost: i > 0,
                      ghostIndex: i + 1,
                      overrideAmount: getInstallmentValue(t),
-                     sortDate: competenceDate.getTime(),
-                     displayDate: instDate.getTime()
+                     sortDate: instDate.getTime()
                   });
                }
             }
@@ -258,7 +219,6 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       let totalExpense = 0;
 
       rawList.forEach(item => {
-         // Agrupa pela data de COMPETÊNCIA (Mês da Fatura)
          const dateKey = new Date(item.sortDate).toISOString().split('T')[0];
          if (!groups[dateKey]) groups[dateKey] = [];
          groups[dateKey].push(item);
@@ -274,7 +234,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
          groupedTransactions: sortedGroups,
          summary: { income: totalIncome, expense: totalExpense, balance: totalIncome - Math.abs(totalExpense) }
       };
-   }, [data.transactions, currentDate, filterCategory, filterAccount, searchTerm, selectedTag, data.accountSettings]);
+   }, [data.transactions, currentDate, filterCategory, filterAccount, searchTerm, selectedTag]);
 
 
    // --- HANDLERS ---
@@ -394,14 +354,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                      />
                   </div>
                   <button onClick={() => setShowChart(!showChart)} className={`p-2.5 rounded-xl border transition-all ${showChart ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-zinc-900 text-zinc-500 border-zinc-800'}`}>
-                     <BarChart className="w-5 h-5 transform rotate-90" />
+                     <BarChartIcon className="w-5 h-5 transform rotate-90" />
                   </button>
                </div>
 
                {/* Smart Tags Horizontal List */}
-               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-2 px-2 mask-gradient-right min-h-[32px]">
-                  {uniqueTags.length > 0 ? (
-                     uniqueTags.map(tag => {
+               {uniqueTags.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-2 px-2 mask-gradient-right">
+                     {uniqueTags.map(tag => {
                         const isActive = selectedTag === tag;
                         return (
                            <button
@@ -417,11 +377,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                               {tag}
                            </button>
                         );
-                     })
-                  ) : (
-                     <span className="text-zinc-600 text-xs italic py-1.5 px-1">Sem tags recentes</span>
-                  )}
-               </div>
+                     })}
+                  </div>
+               )}
             </div>
 
             {/* Summary Strip */}
@@ -474,7 +432,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                                  overrideAmount={item.overrideAmount}
                                  isSelected={selectedIds.has(item.t.id)}
                                  onSelect={toggleSelection}
-                                 displayDate={item.displayDate}
+                                 displayDate={item.sortDate}
                               />
                            ))}
                         </div>
