@@ -1,7 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { ArrowRight, Tag, Sparkles, DollarSign, Plus, Users, TrendingUp, ChevronDown, Layers } from 'lucide-react';
 import { Transaction } from '../types';
 import { CATEGORIES, inferCategory } from '../utils';
+import { useAuth } from '../contexts/AuthContext';
+import { logSmartBarEvent } from '../services/firebase';
 
 interface SmartBarProps {
   onAdd: (t: Omit<Transaction, 'id'>) => void;
@@ -10,240 +12,232 @@ interface SmartBarProps {
   autoFocus?: boolean;
 }
 
+// --- 1. BASE DE CONHECIMENTO HÍBRIDA (Knowledge Base) ---
+const COMMON_TERMS: Record<string, string> = {
+  // Transporte
+  'uber': 'Transporte', '99': 'Transporte', 'indrive': 'Transporte', 'táxi': 'Transporte',
+  'ônibus': 'Transporte', 'busão': 'Transporte', 'metro': 'Transporte', 'gasolina': 'Transporte',
+  'posto': 'Transporte', 'estacionamento': 'Transporte', 'sem parar': 'Transporte', 'veloe': 'Transporte',
+
+  // Alimentação
+  'ifood': 'Alimentação', 'rappi': 'Alimentação', 'ze delivery': 'Alimentação', 'churrasco': 'Alimentação',
+  'restaurante': 'Alimentação', 'padaria': 'Alimentação', 'café': 'Alimentação', 'lanche': 'Alimentação',
+  'burguer': 'Alimentação', 'pizza': 'Alimentação', 'feijoada': 'Alimentação', 'almoço': 'Alimentação',
+  'jantar': 'Alimentação', 'mercado': 'Mercado', 'assai': 'Mercado', 'carrefour': 'Mercado',
+  'pão de açúcar': 'Mercado', 'atacdao': 'Mercado', 'feira': 'Mercado', 'sacolão': 'Mercado',
+
+  // Assinaturas / Serviços
+  'netflix': 'Assinaturas', 'spotify': 'Assinaturas', 'amazon': 'Assinaturas', 'disney': 'Assinaturas',
+  'hbo': 'Assinaturas', 'globo': 'Assinaturas', 'youtube': 'Assinaturas', 'prime': 'Assinaturas',
+  'chatgpt': 'Assinaturas', 'claude': 'Assinaturas', 'internet': 'Contas Fixas', 'claro': 'Contas Fixas',
+  'vivo': 'Contas Fixas', 'tim': 'Contas Fixas', 'oi': 'Contas Fixas', 'luz': 'Contas Fixas',
+  'energia': 'Contas Fixas', 'água': 'Contas Fixas', 'aluguel': 'Contas Fixas', 'condomínio': 'Contas Fixas',
+
+  // Saúde
+  'droga raia': 'Saúde', 'drogasil': 'Saúde', 'farmácia': 'Saúde', 'pacheco': 'Saúde',
+  'médico': 'Saúde', 'dentista': 'Saúde', 'exame': 'Saúde', 'consulta': 'Saúde', 'psicólogo': 'Saúde',
+  'remédio': 'Saúde', 'academia': 'Saúde', 'gympass': 'Saúde', 'smartfit': 'Saúde',
+
+  // Lazer
+  'cinema': 'Lazer', 'ingresso': 'Lazer', 'show': 'Lazer', 'teatro': 'Lazer', 'jogo': 'Lazer',
+  'steam': 'Lazer', 'playstation': 'Lazer', 'xbox': 'Lazer', 'bar': 'Lazer', 'cerveja': 'Lazer'
+};
+
+const STOPWORDS = new Set(['no', 'na', 'do', 'da', 'de', 'em', 'com', 'por', 'via', 'pra', 'para', 'o', 'a', 'os', 'as', 'um', 'uma']);
+
+// --- 3. DICIONÁRIO DE SINÔNIMOS (Fuzzy Matcher) ---
+const SYNONYMS_METHOD: Record<string, string> = {
+  'pix': 'Pix', 'pics': 'Pix', 'piks': 'Pix', 'transferencia': 'Pix', 'trauss': 'Pix',
+  'credito': 'Crédito', 'crédito': 'Crédito', 'cred': 'Crédito', 'cartao': 'Crédito', 'parc': 'Crédito', 'fatura': 'Crédito',
+  'debito': 'Débito', 'débito': 'Débito', 'deb': 'Débito',
+  'dinheiro': 'Dinheiro', 'vivo': 'Dinheiro', 'specie': 'Dinheiro', 'cash': 'Dinheiro', 'papel': 'Dinheiro'
+};
+
+const SYNONYMS_ACCOUNT: Record<string, string> = {
+  'nubank': 'Nubank', 'nu': 'Nubank', 'roxinho': 'Nubank',
+  'inter': 'Inter', 'banco inter': 'Inter', 'laranjinha': 'Inter',
+  'caixa': 'Caixa', 'cef': 'Caixa',
+  'itaú': 'Itaú', 'itau': 'Itaú',
+  'bradesco': 'Bradesco', 'bra': 'Bradesco',
+  'santander': 'Santander', 'santa': 'Santander',
+  'mp': 'MercadoPago', 'mercadopago': 'MercadoPago', 'mercado pago': 'MercadoPago',
+  'carteira': 'Carteira', 'bolso': 'Carteira', 'mãos': 'Carteira'
+};
+
+const INSTALLMENT_KEYWORDS = ['x', 'vezes', 'parcelas', 'parc'];
+
 export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history, autoFocus = false }) => {
+  const { user } = useAuth();
   const [input, setInput] = useState('');
   const [preview, setPreview] = useState<Partial<Transaction> | null>(null);
   const [showCategorySelector, setShowCategorySelector] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Helper mappings
-  const accountKeywords: Record<string, string> = {
-    'inter': 'Inter', 'nubank': 'Nubank', 'nu': 'Nubank', 'roxinho': 'Nubank',
-    'caixa': 'Caixa', 'cef': 'Caixa', 'itaú': 'Itaú', 'itau': 'Itaú',
-    'bradesco': 'Bradesco', 'santander': 'Santander', 'mp': 'MercadoPago',
-    'mercadopago': 'MercadoPago', 'carteira': 'Carteira'
-  };
-
-  const methodKeywords: Record<string, string> = {
-    'credito': 'Crédito', 'crédito': 'Crédito',
-    'debito': 'Débito', 'débito': 'Débito',
-    'pix': 'Pix', 'dinheiro': 'Dinheiro'
-  };
-
-  const splitKeywords = ['dividido', 'rachado', 'split', 'compartilhado', 'metade'];
-  const incomeKeywords = ['recebi', 'entrou', 'ganhei', 'salário', 'salario', 'venda', 'depósito', 'deposito'];
-
-  const capitalizeFirstLetter = (string: string) => {
-    if (!string) return '';
-    return string.charAt(0).toUpperCase() + string.slice(1);
-  };
-
+  // --- 4. MOTOR NLP (The Core) ---
   const parseInput = (text: string) => {
-
     if (!text.trim()) {
       setPreview(null);
-      setShowCategorySelector(false);
       return;
     }
 
-    let processText = text;
+    // A. Pre-processamento e Identificação Inicial
+    let cleanText = text;
     let detectedType: 'income' | 'expense' = 'expense';
-    let detectedDate = new Date().toISOString();
-    let detectedAmount: number | undefined = undefined;
+    let amount: number | undefined = undefined;
+    let date = new Date();
+    let isInstallment = false;
+    let installmentsTotal = 2; // Default fallback
 
-    // 1. DATE DETECTION
-    const monthMap: Record<string, number> = {
-      'janeiro': 0, 'jan': 0, 'fevereiro': 1, 'fev': 1, 'março': 2, 'mar': 2,
-      'abril': 3, 'abr': 3, 'maio': 4, 'mai': 4, 'junho': 5, 'jun': 5,
-      'julho': 6, 'jul': 6, 'agosto': 7, 'ago': 7, 'setembro': 8, 'set': 8,
-      'outubro': 9, 'out': 9, 'novembro': 10, 'nov': 10, 'dezembro': 11, 'dez': 11
+    // Detectar Tipo (Simples keywords high-priority)
+    if (/\b(recebi|ganhei|entrada|salário|pago por|pix recebido)\b/i.test(cleanText)) {
+      detectedType = 'income';
+      cleanText = cleanText.replace(/\b(recebi|ganhei|entrada|salário|pago por|pix recebido)\b/gi, '');
+    }
+
+    // Detectar Valor (Regex robusto de dinheiro)
+    const amountMatch = cleanText.match(/(?:R\$)?\s*(\d+[.,]?\d*)/);
+    if (amountMatch) {
+      amount = parseFloat(amountMatch[1].replace(',', '.'));
+      cleanText = cleanText.replace(amountMatch[0], ''); // Remove valor do texto para não confundir tokens
+    }
+
+    // Detectar Data (Hoje, Ontem, Dia X)
+    const today = new Date();
+    if (/\bontem\b/i.test(cleanText)) {
+      date.setDate(today.getDate() - 1);
+      cleanText = cleanText.replace(/\bontem\b/gi, '');
+    } else {
+      const dateMatch = cleanText.match(/\b(\d{1,2})[-/](\d{1,2})\b/); // DD/MM
+      if (dateMatch) {
+        date = new Date(today.getFullYear(), parseInt(dateMatch[2]) - 1, parseInt(dateMatch[1]), 12, 0, 0);
+        cleanText = cleanText.replace(dateMatch[0], '');
+
+        // Ano Lógico (Futuro proibido -> Ano passado)
+        const buffer = new Date();
+        buffer.setDate(today.getDate() + 1);
+        if (date > buffer) date.setFullYear(today.getFullYear() - 1);
+
+      } else {
+        const dayMatch = cleanText.match(/\bdia\s+(\d{1,2})\b/i);
+        if (dayMatch) {
+          const d = parseInt(dayMatch[1]);
+          // Tenta manter mês atual, se passou dia, talvez mês anterior? Não, default mês atual.
+          date = new Date(today.getFullYear(), today.getMonth(), d, 12, 0, 0);
+          cleanText = cleanText.replace(dayMatch[0], '');
+
+          // Ano Lógico
+          const buffer = new Date();
+          buffer.setDate(today.getDate() + 1);
+          if (date > buffer) date.setMonth(date.getMonth() - 1); // Volta 1 mês se dia for futuro
+        }
+      }
+    }
+
+    // Detectar Parcelamento (Ex: 10x, 12 vezes)
+    const instMatch = cleanText.match(/(\d+)\s*(x|vezes|parc)/i);
+    if (instMatch) {
+      isInstallment = true;
+      installmentsTotal = parseInt(instMatch[1]);
+      cleanText = cleanText.replace(instMatch[0], '');
+    }
+
+    // B. Tokenização e Limpeza
+    const tokens = cleanText
+      .toLowerCase()
+      .replace(/[!?,;]/g, '') // Pontuações
+      .split(/\s+/)
+      .filter(t => t && !STOPWORDS.has(t)); // Remove vazios e stopwords
+
+    // C. Algoritmo de Disputa de Slots
+    const slots = {
+      method: null as string | null,
+      account: null as string | null,
+      descriptionTokens: [] as string[]
     };
 
-    // Regex for "no dia 7 de março" (Consumes "no", "em", "do" prefix)
-    const verboseDateMatch = processText.match(/(?:(?:no|em|do)\s+)?(?:dia\s+)?(\d{1,2})\s+de\s+([a-zç]+)(?:\s+de\s+(\d{4}))?/i);
-    const numericDateMatch = processText.match(/(?:(?:no|em|do)\s+)?(?:dia\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i);
-
-    if (verboseDateMatch) {
-      const day = parseInt(verboseDateMatch[1]);
-      const monthStr = verboseDateMatch[2].toLowerCase();
-      const yearStr = verboseDateMatch[3];
-
-      if (monthMap[monthStr] !== undefined) {
-        let year = yearStr ? parseInt(yearStr) : new Date().getFullYear();
-        const newDate = new Date(year, monthMap[monthStr], day, 12, 0, 0);
-        detectedDate = newDate.toISOString();
-        processText = processText.replace(verboseDateMatch[0], '');
+    tokens.forEach(token => {
+      // 1. Tenta identificar Método
+      if (SYNONYMS_METHOD[token]) {
+        // Ambiguidade: "Pics" (Método) vs Descrição?
+        // Se já temos método, ou se token tem histórico forte como descrição...
+        // Por simplificação: Método ganha prioridade a menos que já tenha um.
+        if (!slots.method) {
+          slots.method = SYNONYMS_METHOD[token];
+          return; // Consumido
+        }
       }
-    } else if (numericDateMatch) {
-      const day = parseInt(numericDateMatch[1]);
-      const month = parseInt(numericDateMatch[2]) - 1;
-      let year = new Date().getFullYear();
-      if (numericDateMatch[3]) {
-        year = parseInt(numericDateMatch[3]);
-        if (year < 100) year += 2000;
+
+      // 2. Tenta identificar Conta
+      if (SYNONYMS_ACCOUNT[token]) {
+        if (!slots.account) {
+          slots.account = SYNONYMS_ACCOUNT[token];
+          return; // Consumido
+        }
       }
-      const newDate = new Date(year, month, day, 12, 0, 0);
-      detectedDate = newDate.toISOString();
-      processText = processText.replace(numericDateMatch[0], '');
+
+      // Fallback: Descrição
+      slots.descriptionTokens.push(token);
+    });
+
+    // Defaults Inteligentes
+    if (!slots.method) {
+      if (slots.account === 'Carteira') slots.method = 'Dinheiro';
+      else if (detectedType === 'expense') slots.method = 'Crédito'; // Default expense
+      else slots.method = 'Pix'; // Default income
     }
 
-    // 2. INSTALLMENT DETECTION
-    let isInstallment = false;
-    let installmentsTotal = undefined;
+    // Default Conta
+    if (!slots.account) slots.account = 'Inter';
 
-    if (/recorrente/i.test(processText)) {
-      isInstallment = true;
-      installmentsTotal = 12;
-      processText = processText.replace(/recorrente/i, '');
-    }
 
-    // CHECK FOR SPECIFIC "10x de 50,00" SYNTAX FIRST (Implies Multiplication)
-    const installmentAndValueMatch = processText.match(/(\d+)\s*(?:x|vezes|parcelas)(?:\s+de)?\s*(?:R\$\s*)?(\d+(?:[.,]\d{1,2})?)/i);
+    // D. Reconstrução da Descrição e Inferência de Categoria
+    let description = slots.descriptionTokens
+      .map(t => t.charAt(0).toUpperCase() + t.slice(1))
+      .join(' ');
 
-    if (installmentAndValueMatch) {
-      // We found "10x de 50". Use this to set BOTH.
-      isInstallment = true;
-      installmentsTotal = parseInt(installmentAndValueMatch[1]);
-      const partValue = parseFloat(installmentAndValueMatch[2].replace(',', '.'));
-      detectedAmount = partValue * installmentsTotal;
-      processText = processText.replace(installmentAndValueMatch[0], '');
+    if (!description) description = detectedType === 'income' ? 'Receita' : 'Nova Despesa';
+
+    // Inferência Híbrida de Categoria
+    let category = 'Outros';
+    const lowerDesc = description.toLowerCase();
+
+    // 1. Histórico (Peso Máximo)
+    const historyMatch = history.find(t => t.origin.toLowerCase() === lowerDesc);
+    if (historyMatch) {
+      category = historyMatch.category;
     } else {
-      // Standard standalone installment check
-      const installmentMatch = processText.match(/(?:parcelado|em)?\s*(\d+)\s*(?:x|vezes|parcelas|meses)/i);
-      if (installmentMatch) {
-        isInstallment = true;
-        installmentsTotal = parseInt(installmentMatch[1]);
-        processText = processText.replace(installmentMatch[0], '');
-      } else if (/parcelado/i.test(processText)) {
-        // Standard 2x fallback
-        isInstallment = true;
-        installmentsTotal = installmentsTotal || 2;
-        // Disabled removal to keep "Parcelado" in title
+      // 2. Base de Conhecimento (Peso Médio)
+      // Check exact match or includes
+      const commonKey = Object.keys(COMMON_TERMS).find(k => lowerDesc.includes(k));
+      if (commonKey) {
+        category = COMMON_TERMS[commonKey];
+      } else {
+        // 3. Fallback Genérico
+        category = inferCategory(description);
       }
     }
 
-    // 3. TYPE DETECTION
-    const lowerTextRaw = processText.toLowerCase();
-    for (const kw of incomeKeywords) {
-      if (lowerTextRaw.includes(kw)) {
-        detectedType = 'income';
-        const regex = new RegExp(`\\b${kw}\\b`, 'gi');
-        processText = processText.replace(regex, '');
-        break;
-      }
-    }
-    if (lowerTextRaw.includes('pix recebido')) {
-      detectedType = 'income';
-      processText = processText.replace(/recebido/gi, '');
-    }
-
-    // 4. AMOUNT DETECTION (Consume "de", "por", "valor" prefix)
-    if (detectedAmount === undefined) {
-      const amountMatch = processText.match(/(?:de|por|valor)?\s*(?:R\$\s*)?(\d+(?:[.,]\d{1,2})?)/i);
-      if (amountMatch) {
-        const rawAmount = amountMatch[1].replace(',', '.');
-        detectedAmount = parseFloat(rawAmount);
-        processText = processText.replace(amountMatch[0], '')
-          .replace(/\breais\b/gi, '')
-          .trim();
-      }
-    }
-
-    if (detectedAmount === undefined) {
+    if (amount === undefined) {
       setPreview(null);
       return;
     }
 
-    const amount = detectedAmount!;
-
-    // 5. TAGS DETECTION
-    const tags: string[] = [];
-    const tagMatches = processText.match(/#\w+/g);
-    if (tagMatches) {
-      tagMatches.forEach(t => {
-        tags.push(t.replace('#', ''));
-        processText = processText.replace(t, '');
-      });
-    }
-
-    // 6. ACCOUNT & METHOD DETECTION
-    const normalizedText = processText.replace(/[.,;](?=\s|$)/g, ' ');
-    const tokens = normalizedText.split(/\s+/);
-
-    let detectedAccount = 'Inter';
-    let detectedMethod = '';
-    let isShared = false;
-
-    const titleTokens: string[] = [];
-    tokens.forEach(token => {
-      if (!token) return;
-      const lower = token.toLowerCase();
-
-      if (splitKeywords.includes(lower)) {
-        isShared = true;
-        return;
-      }
-
-      if (accountKeywords[lower]) {
-        detectedAccount = accountKeywords[lower];
-        return;
-      }
-
-      if (methodKeywords[lower]) {
-        detectedMethod = methodKeywords[lower];
-      }
-      titleTokens.push(token);
-    });
-
-    if (!detectedMethod) {
-      if (detectedAccount === 'Carteira') detectedMethod = 'Dinheiro';
-      else if (detectedType === 'expense') detectedMethod = 'Crédito';
-      else detectedMethod = 'Pix';
-    }
-
-    // 7. CLEAN UP ORIGIN
-    // Remove stranded connectors
-    const connectors = ['de', 'da', 'do', 'no', 'na', 'em', 'por', 'valor'];
-    let origin = titleTokens.filter(t => !connectors.includes(t.toLowerCase())).join(' ').trim();
-
-    if (!origin) origin = detectedType === 'income' ? 'Receita' : 'Nova Transação';
-    origin = capitalizeFirstLetter(origin);
-
-    // 8. CATEGORY INFERENCE (Using Shared Utility + History)
-    let category = 'Outros';
-
-    // Bidirectional Check: "Uber" matches "Uber Viagem" AND "Uber Viagem" matches "Uber"
-    const lastSimilar = history.find(t =>
-      t.origin.toLowerCase().includes(origin.toLowerCase()) ||
-      origin.toLowerCase().includes(t.origin.toLowerCase())
-    );
-
-    if (lastSimilar) {
-      category = lastSimilar.category;
-    } else {
-      if (detectedType === 'income') {
-        category = origin.toLowerCase().includes('salário') ? 'Salário' : 'Outros';
-      } else {
-        category = inferCategory(origin);
-      }
-    }
-
-    setPreview(prev => ({
+    const transactionPreview: Partial<Transaction> = {
       amount,
-      origin,
-      tags: tags.length > 0 ? tags : [],
-      category: (prev && prev.category && prev.category !== 'Outros' && category === 'Outros') ? prev.category : category,
+      origin: description,
+      category,
       type: detectedType,
-      account: detectedAccount,
-      paymentMethod: detectedMethod,
-      date: detectedDate,
+      account: slots.account!,
+      paymentMethod: slots.method!,
+      date: date.toISOString(),
       isInstallment,
-      installmentsTotal: isInstallment ? (installmentsTotal || 2) : undefined,
+      installmentsTotal: isInstallment ? installmentsTotal : undefined,
       currentInstallment: isInstallment ? 1 : undefined,
-      isShared,
-      myShareValue: isShared ? amount / 2 : undefined
-    }));
+      isShared: false // Simplificado
+    };
+
+    setPreview(transactionPreview);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -253,27 +247,49 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
     if (!val) setShowCategorySelector(false);
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (preview && preview.amount && preview.origin) {
+
+      // 1. Cria o objeto final da transação
+      const newTransaction = {
+        ...preview,
+        // Garante valores padrão caso falte algo
+        account: preview.account || 'Inter',
+        paymentMethod: preview.paymentMethod || 'Crédito',
+        category: preview.category || 'Outros',
+        tags: preview.tags || [] // Usa as tags detectadas ou array vazio
+      } as Omit<Transaction, 'id'>;
+
+      // 2. Salva no App (Para o usuário ver)
+      onAdd(newTransaction);
+
+      // 3. Salva no Log de Aprendizado (Para você melhorar a IA depois)
+      if (user) {
+        console.log("🕵️ [SMARTBAR] Tentando enviar log para o Firebase..."); // <--- DEBUG 1
+
+        logSmartBarEvent(user.uid, input, preview, newTransaction)
+          .then((sucesso) => {
+            if (sucesso) console.log("✅ [SMARTBAR] SUCESSO! Log gravado."); // <--- DEBUG 2
+            else console.error("❌ [SMARTBAR] FALHA silenciosa no log.");
+          })
+          .catch(err => console.error("❌ [SMARTBAR] ERRO CRÍTICO:", err));
+      } else {
+        console.warn("⚠️ [SMARTBAR] Sem usuário. Log ignorado.");
+      }
+
+      // 4. Limpa o campo
+      setInput('');
+      setPreview(null);
+      setShowCategorySelector(false);
+    }
+  };
+
   const handleManualCategorySelect = (cat: string) => {
     if (preview) {
       setPreview({ ...preview, category: cat });
       setShowCategorySelector(false);
       inputRef.current?.focus();
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (preview && preview.amount && preview.origin) {
-      const newTransaction = {
-        ...preview,
-        account: preview.account || 'Inter',
-        paymentMethod: preview.paymentMethod || (preview.type === 'expense' ? 'Crédito' : 'N/A'),
-      } as Omit<Transaction, 'id'>;
-
-      onAdd(newTransaction);
-      setInput('');
-      setPreview(null);
-      setShowCategorySelector(false);
     }
   };
 
@@ -297,7 +313,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
             ref={inputRef}
             type="text"
             className="w-full bg-transparent border-none text-white text-base md:text-lg placeholder-zinc-600 focus:ring-0 py-4 pl-3 pr-4 outline-none"
-            placeholder="Digite 'recebi 50 pix da maria dia 22/01'..."
+            placeholder="Digite '100 pics churrasco'..."
             value={input}
             onChange={handleChange}
             onFocus={() => setIsFocused(true)}
@@ -387,14 +403,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
               {preview.isInstallment && (
                 <div className="flex items-center gap-1 bg-zinc-800 border border-zinc-700 rounded-full px-3 py-1.5 text-orange-400 font-medium">
                   <Layers className="w-3 h-3" />
-                  <input
-                    type="number" min="2"
-                    className="w-6 bg-transparent text-center focus:outline-none focus:text-white text-orange-400 font-bold p-0"
-                    value={preview.installmentsTotal}
-                    onChange={(e) => setPreview({ ...preview, installmentsTotal: parseInt(e.target.value) })}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <span>x</span>
+                  <span className="font-bold">{preview.installmentsTotal}x</span>
                 </div>
               )}
               {preview.tags && preview.tags.length > 0 && (
@@ -405,7 +414,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
             </div>
           </div>
           <div className="mt-3 pt-3 border-t border-zinc-800/50 flex justify-between items-center text-[10px] text-zinc-500 uppercase tracking-widest font-medium">
-            <span>AI Detected</span>
+            <span>NLP Engine v2.0 Active</span>
             <span className="flex items-center gap-1">Enter to save <ArrowRight className="w-3 h-3" /></span>
           </div>
         </div>

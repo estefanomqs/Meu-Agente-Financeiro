@@ -46,13 +46,22 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       return list;
    }, []);
 
-   // 2. Extrai Tags Únicas (Smart Tags)
+   // 2. Filtros Rápidos Unificados (Tags + Categorias)
    const uniqueTags = useMemo(() => {
-      const tags = new Set<string>();
+      const items = new Set<string>();
+      const blacklist = ['Fatura PDF', 'Importação PDF', 'Sistema', 'Recorrência', 'Parcelamento', 'Outros']; // Adicionei Outros se desejar
+
       data.transactions.forEach(t => {
-         t.tags?.forEach(tag => tags.add(tag));
+         // Coleta Tags
+         t.tags?.forEach(tag => {
+            if (!blacklist.includes(tag)) items.add(tag);
+         });
+         // Coleta Categoria
+         if (t.category && !blacklist.includes(t.category)) {
+            items.add(t.category);
+         }
       });
-      return Array.from(tags).sort();
+      return Array.from(items).sort();
    }, [data.transactions]);
 
    // Auto-scroll e Centralização do Mês Selecionado (Native API + RAF)
@@ -93,6 +102,23 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       // Mapa: "YYYY-MM" -> Total
       const totals: Record<string, number> = {};
 
+      // Helper: Calcula Data de Competência (Fatura do Cartão) - Duplicado para manter isolamento do hook
+      const getCompetenceDate = (t: Transaction, originalDate: Date): Date => {
+         // Só aplica regra de fechamento para despesas no Crédito (ou bancos específicos)
+         if (t.type === 'expense' && (t.paymentMethod === 'Credit' || ['Nubank', 'Inter'].includes(t.account))) {
+            const settings = data.accountSettings.find(a => a.accountId === t.account);
+            if (settings && settings.closingDay) {
+               if (originalDate.getDate() >= settings.closingDay) {
+                  const competence = new Date(originalDate);
+                  competence.setMonth(competence.getMonth() + 1);
+                  competence.setDate(1);
+                  return competence;
+               }
+            }
+         }
+         return originalDate;
+      };
+
       // Inicializa 6 meses em volta da data atual
       const rangeStart = new Date(currentDate);
       rangeStart.setMonth(rangeStart.getMonth() - 3);
@@ -100,11 +126,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       rangeEnd.setMonth(rangeEnd.getMonth() + 3);
 
       data.transactions.forEach(t => {
-         // Logica simplificada de projeção para o gráfico
+         // Logica de projeção + Competência
          if (!t.isInstallment) {
             const tDate = new Date(t.date);
+            const compDate = getCompetenceDate(t, tDate); // Usa data de competência
+
             if (t.type === 'expense') {
-               const key = `${tDate.getFullYear()}-${tDate.getMonth()}`;
+               const key = `${compDate.getFullYear()}-${compDate.getMonth()}`;
                totals[key] = (totals[key] || 0) + getEffectiveAmount(t);
             }
          } else {
@@ -114,8 +142,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             for (let i = 0; i < total; i++) {
                const instDate = new Date(tDate);
                instDate.setMonth(tDate.getMonth() + i);
+
+               const compDate = getCompetenceDate(t, instDate); // Usa data de competência
+
                if (t.type === 'expense') {
-                  const key = `${instDate.getFullYear()}-${instDate.getMonth()}`;
+                  const key = `${compDate.getFullYear()}-${compDate.getMonth()}`;
                   totals[key] = (totals[key] || 0) + val;
                }
             }
@@ -136,7 +167,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
          });
       }
       return dataPoints;
-   }, [data.transactions, currentDate]);
+   }, [data.transactions, currentDate, data.accountSettings]);
 
 
    // 4. Transações do Mês Selecionado (Listing)
@@ -145,8 +176,26 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
       end.setHours(23, 59, 59, 999);
 
-      let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number }[] = [];
+      let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number, displayDate: number }[] = [];
       const searchLower = searchTerm.toLowerCase();
+
+      // Helper: Calcula Data de Competência (Fatura do Cartão)
+      const calculateCompetenceDate = (t: Transaction, originalDate: Date): Date => {
+         // Só aplica regra de fechamento para despesas no Crédito (ou bancos específicos se desejado)
+         if (t.type === 'expense' && (t.paymentMethod === 'Credit' || ['Nubank', 'Inter'].includes(t.account))) {
+            const settings = data.accountSettings.find(a => a.accountId === t.account);
+            if (settings && settings.closingDay) {
+               if (originalDate.getDate() >= settings.closingDay) {
+                  // Joga para o próximo mês (Mês da Fatura)
+                  const competence = new Date(originalDate);
+                  competence.setMonth(competence.getMonth() + 1);
+                  competence.setDate(1); // Normaliza para evitar edge cases de dias 31
+                  return competence;
+               }
+            }
+         }
+         return originalDate;
+      };
 
       data.transactions.forEach(t => {
          // Search Filter
@@ -155,18 +204,27 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             t.category.toLowerCase().includes(searchLower) ||
             (t.tags && t.tags.some(tag => tag.toLowerCase().includes(searchLower)));
 
-         // Tag Filter
-         const matchesTag = !selectedTag || (t.tags && t.tags.includes(selectedTag));
+         // Quick Filter (Tag OR Category)
+         const matchesTag = !selectedTag ||
+            (t.tags && t.tags.includes(selectedTag)) ||
+            t.category === selectedTag;
 
          if (!matchesSearch || !matchesTag) return;
          if (filterCategory !== 'Todas' && t.category !== filterCategory) return;
          if (filterAccount !== 'Todos' && t.account !== filterAccount) return;
 
-         // Date Projection Check
+         // Date Projection Check (Usando Competência)
          if (!t.isInstallment) {
             const tDate = new Date(t.date);
-            if (tDate >= start && tDate <= end) {
-               rawList.push({ t, isGhost: false, sortDate: tDate.getTime() });
+            const competenceDate = calculateCompetenceDate(t, tDate);
+
+            if (competenceDate >= start && competenceDate <= end) {
+               rawList.push({
+                  t,
+                  isGhost: false,
+                  sortDate: competenceDate.getTime(),
+                  displayDate: tDate.getTime()
+               });
             }
          } else {
             const total = t.installmentsTotal || 1;
@@ -174,13 +232,18 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             for (let i = 0; i < total; i++) {
                const instDate = new Date(tDate);
                instDate.setMonth(tDate.getMonth() + i);
-               if (instDate >= start && instDate <= end) {
+
+               // Aplica regra de competência em CADA parcela
+               const competenceDate = calculateCompetenceDate(t, instDate);
+
+               if (competenceDate >= start && competenceDate <= end) {
                   rawList.push({
                      t,
                      isGhost: i > 0,
                      ghostIndex: i + 1,
                      overrideAmount: getInstallmentValue(t),
-                     sortDate: instDate.getTime()
+                     sortDate: competenceDate.getTime(),
+                     displayDate: instDate.getTime()
                   });
                }
             }
@@ -195,6 +258,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       let totalExpense = 0;
 
       rawList.forEach(item => {
+         // Agrupa pela data de COMPETÊNCIA (Mês da Fatura)
          const dateKey = new Date(item.sortDate).toISOString().split('T')[0];
          if (!groups[dateKey]) groups[dateKey] = [];
          groups[dateKey].push(item);
@@ -210,7 +274,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
          groupedTransactions: sortedGroups,
          summary: { income: totalIncome, expense: totalExpense, balance: totalIncome - Math.abs(totalExpense) }
       };
-   }, [data.transactions, currentDate, filterCategory, filterAccount, searchTerm, selectedTag]);
+   }, [data.transactions, currentDate, filterCategory, filterAccount, searchTerm, selectedTag, data.accountSettings]);
 
 
    // --- HANDLERS ---
@@ -335,9 +399,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                </div>
 
                {/* Smart Tags Horizontal List */}
-               {uniqueTags.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-2 px-2 mask-gradient-right">
-                     {uniqueTags.map(tag => {
+               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-2 px-2 mask-gradient-right min-h-[32px]">
+                  {uniqueTags.length > 0 ? (
+                     uniqueTags.map(tag => {
                         const isActive = selectedTag === tag;
                         return (
                            <button
@@ -353,9 +417,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                               {tag}
                            </button>
                         );
-                     })}
-                  </div>
-               )}
+                     })
+                  ) : (
+                     <span className="text-zinc-600 text-xs italic py-1.5 px-1">Sem tags recentes</span>
+                  )}
+               </div>
             </div>
 
             {/* Summary Strip */}
@@ -408,7 +474,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                                  overrideAmount={item.overrideAmount}
                                  isSelected={selectedIds.has(item.t.id)}
                                  onSelect={toggleSelection}
-                                 displayDate={item.sortDate}
+                                 displayDate={item.displayDate}
                               />
                            ))}
                         </div>
