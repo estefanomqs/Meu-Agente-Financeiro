@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useLayoutEffect, useRef, useEffect } from 'react';
-import { FileSpreadsheet, MessageCircle, CheckSquare, Square, Trash2, Search, Filter, Tag, ChevronLeft, ChevronRight, Calendar, BarChart as BarChartIcon, Download, FileText, Layers } from 'lucide-react';
+import { FileSpreadsheet, MessageCircle, CheckSquare, Square, Trash2, Search, Filter, Tag, ChevronLeft, ChevronRight, Calendar, BarChart as BarChartIcon, Download, FileText, Layers, TrendingUp, TrendingDown, Wallet, CreditCard, Sparkles } from 'lucide-react';
 import { BarChart, Bar, Cell, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -12,6 +12,8 @@ if (typeof window !== 'undefined') {
 import { Transaction, AppData } from '../types';
 import { getEffectiveAmount, getInstallmentValue, getEstimatedPaymentDate, formatCurrency, getAccountColor, getCategoryColor } from '../utils';
 import { TransactionRow } from '../components/TransactionRow';
+import { useFinanceStore } from '../hooks/useFinanceStore';
+import { AccountSettingsModal } from '../components/AccountSettingsModal';
 
 interface TransactionsViewProps {
    data: AppData;
@@ -26,6 +28,8 @@ interface TransactionsViewProps {
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
    data, privacyMode, onEditTransaction, onDeleteTransaction, onExportCSV, onWhatsApp, onBulkDelete
 }) => {
+   const { updateAccountSettings, deleteAccountSettings } = useFinanceStore();
+   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
    // State Principal: Data Selecionada (Mês/Ano)
    const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -606,179 +610,258 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
    };
 
    return (
-      <div className="space-y-4 animate-in fade-in pb-24 relative">
+      <div className="min-h-screen bg-background pb-24 relative">
 
-         {/* 1. Header: Month Navigation & Chart (Swipe Area) */}
-         <div
-            className="sticky top-0 z-30 bg-background/95 backdrop-blur-md pt-4 pb-2 border-b border-zinc-800 space-y-4 cursor-grab active:cursor-grabbing select-none"
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-            onMouseDown={onTouchStart}
-            onMouseMove={onTouchMove}
-            onMouseUp={onTouchEnd}
-            onMouseLeave={onTouchEnd}
-         >
+         {/* 1. HEADER DE COMANDO (Premium Sticky) */}
+         <div className="sticky top-0 z-40 w-full backdrop-blur-xl bg-background/80 border-b border-white/5 shadow-2xl shadow-black/20">
+            <div className="flex items-center justify-between pl-2 pr-4 py-2">
 
-            {/* Month Selector Carousel */}
-            <div className="relative group">
+               {/* Month Selector Wrapper */}
                <div
-                  ref={monthsContainerRef}
-                  className="flex overflow-x-auto gap-4 px-4 pb-2 scrollbar-hide snap-x snap-mandatory mask-gradient"
-                  style={{ maskImage: 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)' } as any}
+                  className="flex-1 overflow-hidden"
+                  onTouchStart={onTouchStart}
+                  onTouchMove={onTouchMove}
+                  onTouchEnd={onTouchEnd}
                >
-                  {monthsList.map((month, idx) => {
-                     const isSelected = month.getMonth() === currentDate.getMonth() && month.getFullYear() === currentDate.getFullYear();
-                     return (
-                        <button
-                           key={idx}
-                           id={`month-btn-${idx}`}
-                           onClick={() => setCurrentDate(month)}
-                           className={`snap-center shrink-0 flex flex-col items-center justify-center min-w-[80px] py-2 rounded-xl transition-all ${isSelected ? 'scale-110' : 'opacity-50 hover:opacity-80'}`}
-                        >
-                           <span className={`text-xs uppercase font-bold tracking-widest ${isSelected ? 'text-primary' : 'text-zinc-500'}`}>
-                              {month.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}
-                           </span>
-                           <span className={`text-[10px] ${isSelected ? 'text-white' : 'text-zinc-600'}`}>
-                              {month.getFullYear()}
-                           </span>
-                           {isSelected && <div className="w-1 h-1 bg-primary rounded-full mt-1"></div>}
-                        </button>
-                     );
-                  })}
+                  <div
+                     ref={monthsContainerRef}
+                     className="flex overflow-x-auto gap-3 px-2 scrollbar-hide snap-x snap-mandatory mask-gradient-right items-center"
+                  >
+                     {monthsList.map((month, idx) => {
+                        const isSelected = month.getMonth() === currentDate.getMonth() && month.getFullYear() === currentDate.getFullYear();
+                        return (
+                           <button
+                              key={idx}
+                              id={`month-btn-${idx}`}
+                              onClick={() => setCurrentDate(month)}
+                              className={`
+                                 snap-center shrink-0 flex flex-col items-center justify-center min-w-[70px] py-1.5 rounded-xl transition-all duration-300
+                                 ${isSelected ? 'bg-zinc-800/50 scale-100' : 'opacity-40 scale-90 hover:opacity-70'}
+                              `}
+                           >
+                              <span className={`text-[10px] uppercase font-bold tracking-widest ${isSelected ? 'text-primary' : 'text-zinc-500'}`}>
+                                 {month.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}
+                              </span>
+                              <span className={`text-[13px] font-medium leading-none mt-0.5 ${isSelected ? 'text-white' : 'text-zinc-600'}`}>
+                                 {month.getFullYear()}
+                              </span>
+                           </button>
+                        );
+                     })}
+                  </div>
                </div>
 
-               {/* Arrow Controls (Desktop) */}
+               {/* Chart Toggle */}
                <button
-                  onClick={() => {
-                     const prev = new Date(currentDate);
-                     prev.setMonth(prev.getMonth() - 1);
-                     setCurrentDate(prev);
-                     monthsContainerRef.current?.scrollBy({ left: -100, behavior: 'smooth' });
-                  }}
-                  className="absolute left-0 top-1/2 -translate-y-1/2 p-2 bg-black/50 backdrop-blur-sm rounded-r-full text-white opacity-0 group-hover:opacity-100 transition-opacity md:flex hidden"
+                  onClick={() => setShowChart(!showChart)}
+                  className={`shrink-0 ml-2 w-9 h-9 flex items-center justify-center rounded-xl transition-all ${showChart ? 'bg-primary/10 text-primary' : 'bg-transparent text-zinc-500 hover:bg-zinc-800'}`}
                >
-                  <ChevronLeft className="w-4 h-4" />
+                  <BarChartIcon className="w-4 h-4" />
                </button>
-               <button
-                  onClick={() => {
-                     const next = new Date(currentDate);
-                     next.setMonth(next.getMonth() + 1);
-                     setCurrentDate(next);
-                     monthsContainerRef.current?.scrollBy({ left: 100, behavior: 'smooth' });
-                  }}
-                  className="absolute right-0 top-1/2 -translate-y-1/2 p-2 bg-black/50 backdrop-blur-sm rounded-l-full text-white opacity-0 group-hover:opacity-100 transition-opacity md:flex hidden"
-               >
-                  <ChevronRight className="w-4 h-4" />
-               </button>
-            </div>
 
-            {/* Monthly Trend Chart (Collapsible or Mini) */}
-            <div className={`transition-all duration-300 overflow-hidden ${showChart ? 'h-32 opacity-100' : 'h-0 opacity-0'}`}>
+               {/* Export Button (Right Aligned) */}
+               <div className="relative shrink-0 ml-2" ref={exportMenuRef}>
+                  <button
+                     onClick={() => setShowExportMenu(!showExportMenu)}
+                     className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 rounded-xl transition-all active:scale-95"
+                  >
+                     <FileSpreadsheet className="w-4 h-4" />
+                     <span className="text-xs font-bold hidden md:inline">Exportar</span>
+                  </button>
+
+                  {/* Export Menu */}
+                  {showExportMenu && (
+                     <div className="absolute top-full right-0 mt-3 w-56 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 origin-top-right">
+                        <div className="px-3 py-2 border-b border-zinc-800 mb-1">
+                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Opções de Relatório</span>
+                        </div>
+                        <button onClick={() => handleExport('month')} className="w-full text-left px-3 py-2.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl flex items-center gap-3 transition-colors">
+                           <Calendar className="w-4 h-4 text-zinc-500" />
+                           <div>
+                              <p className="font-medium">Mês Atual</p>
+                              <p className="text-[10px] text-zinc-500">Apenas visualização atual</p>
+                           </div>
+                        </button>
+                        <button onClick={() => handleExport('year')} className="w-full text-left px-3 py-2.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl flex items-center gap-3 transition-colors">
+                           <Layers className="w-4 h-4 text-zinc-500" />
+                           <div>
+                              <p className="font-medium">Ano Atual</p>
+                              <p className="text-[10px] text-zinc-500">Mês a mês (Abas separadas)</p>
+                           </div>
+                        </button>
+                        <button onClick={() => handleExport('all')} className="w-full text-left px-3 py-2.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-xl flex items-center gap-3 transition-colors">
+                           <FileText className="w-4 h-4 text-zinc-500" />
+                           <div>
+                              <p className="font-medium">Tudo</p>
+                              <p className="text-[10px] text-zinc-500">Backup completo</p>
+                           </div>
+                        </button>
+                     </div>
+                  )}
+               </div>
+            </div>
+         </div>
+
+         {/* 2. GRÁFICO (Collapsible) */}
+         <div className={`overflow-hidden transition-all duration-500 ease-in-out ${showChart ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0'}`}>
+            <div className="h-48 w-full mt-4 px-2">
                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData}>
+                  <BarChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                     <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#71717a', fontSize: 10 }}
+                        dy={10}
+                     />
                      <Tooltip
-                        cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                        contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '12px' }}
+                        cursor={{ fill: '#27272a', opacity: 0.4 }}
+                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '12px', color: '#fff' }}
                         itemStyle={{ color: '#fff' }}
-                        formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Gastos']}
-                        labelFormatter={() => ''}
+                        formatter={(value: number) => formatCurrency(value, privacyMode)}
+                        labelStyle={{ color: '#a1a1aa', marginBottom: '0.25rem' }}
                      />
                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                         {chartData.map((entry, index) => (
                            <Cell
                               key={`cell-${index}`}
-                              fill={entry.isCurrent ? '#f97316' : '#27272a'}
-                              className="transition-all duration-300 hover:opacity-80 cursor-pointer"
-                              onClick={() => setCurrentDate(entry.fullDate)}
+                              fill={entry.isCurrent ? '#10b981' : '#3f3f46'} // Emerald for current, Zinc for others
+                              fillOpacity={entry.isCurrent ? 1 : 0.3}
                            />
                         ))}
                      </Bar>
                   </BarChart>
                </ResponsiveContainer>
             </div>
+         </div>
 
-            {/* Config & Search Bar */}
-            <div className="flex flex-col gap-3 px-2">
-               <div className="flex gap-2">
-                  <div className="relative flex-1">
-                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                     <input
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                        placeholder="Buscar transações..."
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:border-primary transition-all shadow-inner"
-                     />
+         {/* 3. PULSO FINANCEIRO (3 Cards) */}
+         <div className="pt-6 px-4 pb-2">
+            <div className="grid grid-cols-3 gap-3">
+               {/* Entradas */}
+               <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-3 flex flex-col justify-between h-24 backdrop-blur-sm">
+                  <div className="flex items-start justify-between">
+                     <div className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-500">
+                        <TrendingUp className="w-4 h-4" />
+                     </div>
                   </div>
-
-                  <button onClick={() => setShowChart(!showChart)} className={`p-2.5 rounded-xl border transition-all ${showChart ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-zinc-900 text-zinc-500 border-zinc-800'}`}>
-                     <BarChartIcon className="w-5 h-5 transform rotate-90" />
-                  </button>
+                  <div>
+                     <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Entradas</p>
+                     <p className="text-sm font-bold text-emerald-400 truncate">
+                        {formatCurrency(summary.income, privacyMode)}
+                     </p>
+                  </div>
                </div>
 
-               {/* NEW EXPORT BUTTON & MENU (POSITIONED BELOW SEARCH) */}
-               <div className="flex justify-between items-center -mt-1 px-1 relative z-50">
-                  <div className="relative" ref={exportMenuRef}>
-                     <button
-                        onClick={() => setShowExportMenu(!showExportMenu)}
-                        className="flex items-center gap-2 text-xs font-medium text-zinc-400 hover:text-emerald-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800/50"
-                     >
-                        <FileSpreadsheet className="w-4 h-4" />
-                        Exportar Relatório
-                     </button>
+               {/* Saídas */}
+               <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-3 flex flex-col justify-between h-24 backdrop-blur-sm">
+                  <div className="flex items-start justify-between">
+                     <div className="p-1.5 bg-red-500/10 rounded-lg text-red-500">
+                        <TrendingDown className="w-4 h-4" />
+                     </div>
+                  </div>
+                  <div>
+                     <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Saídas</p>
+                     <p className="text-sm font-bold text-red-400 truncate">
+                        {formatCurrency(Math.abs(summary.expense), privacyMode)}
+                     </p>
+                  </div>
+               </div>
 
-                     {showExportMenu && (
-                        <div className="absolute top-full left-0 mt-2 w-48 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-top-2 overflow-hidden">
-                           <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-3 py-2 border-b border-zinc-800 mb-1">
-                              Selecionar Período
-                           </p>
-                           <button onClick={() => handleExport('month')} className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg flex items-center gap-2">
-                              <Calendar className="w-3.5 h-3.5 text-zinc-500" /> Mês Atual
-                           </button>
-                           <button onClick={() => handleExport('year')} className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg flex items-center gap-2">
-                              <Layers className="w-3.5 h-3.5 text-zinc-500" /> Ano Atual
-                           </button>
-                           <button onClick={() => handleExport('all')} className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg flex items-center gap-2">
-                              <FileText className="w-3.5 h-3.5 text-zinc-500" /> Todo o Período
-                           </button>
+               {/* Saldo */}
+               <div className={`
+                   rounded-2xl p-3 flex flex-col justify-between h-24 backdrop-blur-sm border
+                   ${summary.balance >= 0
+                     ? 'bg-emerald-500/5 border-emerald-500/20 shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)]'
+                     : 'bg-red-500/5 border-red-500/20 shadow-[0_0_15px_-5px_rgba(239,68,68,0.2)]'
+                  }
+                `}>
+                  <div className="flex items-start justify-between">
+                     <div className={`p-1.5 rounded-lg ${summary.balance >= 0 ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+                        <Wallet className="w-4 h-4" />
+                     </div>
+                  </div>
+                  <div>
+                     <p className={`text-[10px] font-bold uppercase tracking-wider ${summary.balance >= 0 ? 'text-emerald-500/70' : 'text-red-500/70'}`}>
+                        Saldo Líquido
+                     </p>
+                     <p className={`text-sm font-black truncate ${summary.balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {formatCurrency(summary.balance, privacyMode)}
+                     </p>
+                  </div>
+               </div>
+            </div>
+         </div>
+
+         {/* 3. MEUS CARTÕES (Carousel) */}
+         {data.accountSettings.length > 0 && (
+            <div className="pl-4 py-2 flex overflow-x-auto gap-3 scrollbar-hide mask-gradient-right pr-4 mb-2">
+               {data.accountSettings.map(acc => {
+                  const today = new Date();
+                  const closing = new Date(today.getFullYear(), today.getMonth(), acc.closingDay);
+                  const due = new Date(today.getFullYear(), today.getMonth(), acc.dueDay);
+
+                  return (
+                     <div key={acc.accountId} className="shrink-0 w-36 bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex flex-col gap-2 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
                         </div>
-                     )}
-                  </div>
+                        <div className="flex items-center gap-2">
+                           <CreditCard className="w-4 h-4 text-zinc-500" />
+                           <span className="text-xs font-bold text-zinc-300 truncate">{acc.accountId}</span>
+                        </div>
+                        <div className="flex flex-col">
+                           <span className="text-[10px] text-zinc-500 font-medium">Fecha dia {acc.closingDay}</span>
+                           <span className="text-[10px] text-zinc-600">Vence dia {acc.dueDay}</span>
+                        </div>
+                     </div>
+                  );
+               })}
+               {/* Add Card Shortcut */}
+ {/* Add Card Shortcut */}
+               <button
+                  onClick={() => {
+                     console.log('Abrindo configurações...');
+                     setIsSettingsOpen(true);
+                  }}
+                  className="shrink-0 w-10 flex items-center justify-center bg-zinc-900/50 border border-zinc-800/50 border-dashed rounded-xl hover:bg-zinc-800/80 hover:border-zinc-700 transition-colors cursor-pointer"
+               >
+                  <span className="text-xl text-zinc-500 hover:text-white transition-colors">+</span>
+               </button>
+            </div>
+         )}
+
+         {/* 4. FILTROS E BUSCA (Relocated) */}
+         <div className="sticky top-[60px] z-30 px-4 py-2 bg-background/95 backdrop-blur-xl border-b border-zinc-800/50 mb-4 transition-all">
+            <div className="flex gap-2">
+               <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+                  <input
+                     value={searchTerm}
+                     onChange={e => setSearchTerm(e.target.value)}
+                     placeholder="Buscar..."
+                     className="w-full bg-zinc-900/80 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-zinc-600 focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
+                  />
                </div>
 
-               {/* Smart Tags Horizontal List */}
                {uniqueTags.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-2 px-2 mask-gradient-right">
-                     {uniqueTags.map(tag => {
-                        const isActive = selectedTag === tag;
-                        return (
-                           <button
-                              key={tag}
-                              onClick={() => setSelectedTag(isActive ? null : tag)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all whitespace-nowrap
-                                 ${isActive
-                                    ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
-                                    : 'bg-zinc-900/50 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800'
-                                 }`}
-                           >
-                              <Tag className={`w-3 h-3 ${isActive ? 'text-white' : 'text-zinc-500'}`} />
-                              {tag}
-                           </button>
-                        );
-                     })}
+                  <div className="flex gap-1 overflow-x-auto max-w-[40%] scrollbar-hide mask-gradient-left-right">
+                     {uniqueTags.map(tag => (
+                        <button
+                           key={tag}
+                           onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                           className={`
+                               px-2.5 py-1.5 rounded-lg text-[10px] font-medium border whitespace-nowrap transition-all
+                               ${selectedTag === tag
+                                 ? 'bg-primary text-white border-primary'
+                                 : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-700'}
+                            `}
+                        >
+                           #{tag}
+                        </button>
+                     ))}
                   </div>
                )}
-            </div>
-
-            {/* Summary Strip */}
-            <div className="flex items-center justify-between px-2 text-xs font-medium border-t border-white/5 pt-2">
-               <div className="flex gap-4">
-                  <span className="text-emerald-400">Entradas: {formatCurrency(summary.income, privacyMode)}</span>
-                  <span className="text-red-400">Saídas: {formatCurrency(Math.abs(summary.expense), privacyMode)}</span>
-               </div>
-               <span className={`${summary.balance >= 0 ? 'text-emerald-500' : 'text-red-500'} font-bold`}>
-                  {formatCurrency(summary.balance, privacyMode)}
-               </span>
             </div>
          </div>
 
@@ -839,6 +922,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   <Trash2 className="w-3 h-3" /> Excluir
                </button>
             </div>
+         )}
+         {isSettingsOpen && AccountSettingsModal && (
+            <AccountSettingsModal
+               isOpen={isSettingsOpen}
+               onClose={() => setIsSettingsOpen(false)}
+               currentSettings={data.accountSettings || []}
+               onSave={updateAccountSettings || (() => console.warn('updateAccountSettings not available'))}
+            />
          )}
       </div>
    );
