@@ -88,22 +88,27 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
    }, [currentDate, monthsList]);
 
-   // --- HELPER DE DATA REAL ---
-   // Essa função decide qual data usar para exibir no extrato
+   // --- HELPER DE DATA REAL (CORRIGIDO) ---
+   // Determina onde a transação deve aparecer no extrato
    const getDisplayDate = (t: Transaction): Date => {
-      // 1. Se NÃO for Crédito, a data é SEMPRE a data original (compra)
+      // 1. Débito, Pix, Dinheiro -> Data Original da Compra
       if (t.paymentMethod !== 'Crédito') {
-         return new Date(t.date);
+         const d = new Date(t.date);
+         // Ajuste de fuso para garantir que '2023-11-01' não vire '2023-10-31'
+         if (t.date.length === 10) d.setHours(12, 0, 0, 0);
+         return d;
       }
 
-      // 2. Se for Crédito, tentamos calcular a data da fatura
+      // 2. Crédito -> Data da Fatura (Vencimento Real ou Estimado)
       const settings = data.accountSettings.find(a => a.accountId === t.account);
       if (settings) {
          return getEstimatedPaymentDate(t.date, settings);
       }
 
-      // 3. Fallback: Data original
-      return new Date(t.date);
+      // Fallback se não achar config
+      const d = new Date(t.date);
+      if (t.date.length === 10) d.setHours(12, 0, 0, 0);
+      return d;
    };
 
    // 3. Dados do Gráfico (Panorama de 6 meses)
@@ -119,8 +124,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
       data.transactions.forEach(t => {
          // Logica de projeção para o gráfico
-         if (!t.isInstallment) {
-            const tDate = getDisplayDate(t); // <--- USA O HELPER CORRIGIDO
+         if (!t.isInstallment || !t.installmentsTotal || t.installmentsTotal <= 1) {
+            const tDate = getDisplayDate(t);
             if (t.type === 'expense') {
                const key = `${tDate.getFullYear()}-${tDate.getMonth()}`;
                totals[key] = (totals[key] || 0) + getEffectiveAmount(t);
@@ -159,61 +164,74 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       return dataPoints;
    }, [data.transactions, currentDate]);
 
-
    // 4. Transações do Mês Selecionado (Listing)
    const { groupedTransactions, summary } = useMemo(() => {
+      // Intervalo do Mês Selecionado (Start 00:00 -> End 23:59)
       const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      start.setHours(0, 0, 0, 0);
+
       const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
       end.setHours(23, 59, 59, 999);
 
-      let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number }[] = [];
+      let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number, displayDate: number }[] = [];
       const searchLower = searchTerm.toLowerCase();
 
       data.transactions.forEach(t => {
-         // Search Filter
+         // --- Filters Clean ---
          const matchesSearch = !searchTerm ||
             t.origin.toLowerCase().includes(searchLower) ||
             t.category.toLowerCase().includes(searchLower) ||
             (t.tags && t.tags.some(tag => tag.toLowerCase().includes(searchLower)));
 
-         // Tag Filter
          const matchesTag = !selectedTag || (t.tags && t.tags.includes(selectedTag));
 
          if (!matchesSearch || !matchesTag) return;
          if (filterCategory !== 'Todas' && t.category !== filterCategory) return;
          if (filterAccount !== 'Todos' && t.account !== filterAccount) return;
 
-         // --- PROJECTION CHECK CORRIGIDO ---
-         if (!t.isInstallment) {
-            const tDate = getDisplayDate(t); // <--- USA O HELPER QUE RESPEITA DÉBITO
+         // --- DATA & PARCELAMENTO ---
+         if (!t.isInstallment || !t.installmentsTotal || t.installmentsTotal <= 1) {
+            // Pagamento Único
+            const displayDate = getDisplayDate(t);
 
-            if (tDate >= start && tDate <= end) {
-               rawList.push({ t, isGhost: false, sortDate: tDate.getTime() });
+            // FILTRO RIGOROSO: Só mostra se cair no mês
+            if (displayDate >= start && displayDate <= end) {
+               rawList.push({
+                  t,
+                  isGhost: false,
+                  sortDate: displayDate.getTime(),
+                  displayDate: displayDate.getTime()
+               });
             }
          } else {
-            const total = t.installmentsTotal || 1;
-            const firstDate = getDisplayDate(t); // <--- USA O HELPER
+            // Recorrência / Parcelado
+            const initialDate = getDisplayDate(t);
+            const val = getInstallmentValue(t);
 
-            for (let i = 0; i < total; i++) {
-               const instDate = new Date(firstDate);
-               instDate.setMonth(firstDate.getMonth() + i);
+            for (let i = 0; i < t.installmentsTotal; i++) {
+               // Projeta a parcela i meses à frente
+               const parcelDate = new Date(initialDate);
+               parcelDate.setMonth(initialDate.getMonth() + i);
 
-               if (instDate >= start && instDate <= end) {
+               // FILTRO RIGOROSO: Só mostra se essa parcela específica cair no mês
+               if (parcelDate >= start && parcelDate <= end) {
                   rawList.push({
                      t,
-                     isGhost: i > 0,
+                     isGhost: i > 0, // A partir da 2ª é fantasma (futura)
                      ghostIndex: i + 1,
-                     overrideAmount: getInstallmentValue(t),
-                     sortDate: instDate.getTime()
+                     overrideAmount: val,
+                     sortDate: parcelDate.getTime(),
+                     displayDate: parcelDate.getTime()
                   });
                }
             }
          }
       });
 
+      // Ordenar: Mais recentes primeiro
       rawList.sort((a, b) => b.sortDate - a.sortDate);
 
-      // Grouping
+      // Agrupar
       const groups: Record<string, typeof rawList> = {};
       let totalIncome = 0;
       let totalExpense = 0;
