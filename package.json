@@ -9,15 +9,20 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
+    "firebase": "^12.8.0",
+    "lucide-react": "^0.563.0",
+    "pdfjs-dist": "3.11.174",
+    "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "recharts": "^3.7.0",
-    "react": "^19.2.3",
-    "lucide-react": "^0.563.0",
-    "xlsx": "0.18.5",
-    "pdfjs-dist": "3.11.174",
-    "firebase": "^12.8.0"
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
+    "@types/file-saver": "^2.0.7",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",

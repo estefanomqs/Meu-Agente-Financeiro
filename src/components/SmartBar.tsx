@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowRight, Tag, Sparkles, DollarSign, Plus, Users, TrendingUp, ChevronDown, Layers, CreditCard, Wallet, Calendar } from 'lucide-react';
+import { ArrowRight, Tag, Sparkles, DollarSign, Plus, Users, TrendingUp, ChevronDown, Layers, CreditCard, Wallet, Calendar, MousePointerClick } from 'lucide-react';
 import { Transaction } from '../types';
 import { CATEGORIES, inferCategory } from '../utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -61,9 +61,21 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
 
   // --- 1. MOTOR NLP (The Core) ---
   const parseInput = (text: string) => {
-    if (!text.trim()) return;
+    // 1. Sanitização Pesada (Dealing with Paste/WhatsApp)
+    if (!text) {
+      setPreview(null);
+      return;
+    }
 
-    let cleanText = text;
+    // Remove quebras de linha, tabs e múltiplos espaços, e caracteres de formatação (*_)
+    let cleanText = text
+      .replace(/[\n\r\t]/g, ' ')       // Quebras viram espaço
+      .replace(/[*_]/g, '')            // Remove negrito/itálico do Zap
+      .replace(/\s+/g, ' ')            // Remove espaços duplos
+      .trim();
+
+    if (!cleanText) return;
+
     let detectedType: 'income' | 'expense' = 'expense';
     let amount: number | undefined = undefined;
     let date = new Date(); // Será sobrescrito se acharmos data
@@ -173,6 +185,9 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
       if (amountMatch) {
         amount = parseFloat(amountMatch[1].replace(',', '.'));
         cleanText = cleanText.replace(amountMatch[0], '');
+
+        // 1.1 Limpeza de Moeda (Sanitização)
+        cleanText = cleanText.replace(/\b(reais|real|rs|mangos?|pila)\b/gi, '');
       }
 
       // 2. Detectar Parcelamento Isolado (Ex: "Compra 1000 em 10x")
@@ -184,14 +199,30 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
       }
     }
 
-    // D. Limpeza e Tokenização
+    // D. Detectar Método Explícito (Crédito / Débito / Pix)
+    let explicitMethod: string | undefined = undefined;
+
+    if (/\b(crédito|credito)\b/i.test(cleanText)) {
+      explicitMethod = 'Crédito';
+      cleanText = cleanText.replace(/\b(crédito|credito)\b/gi, '');
+    }
+    else if (/\b(débito|debito)\b/i.test(cleanText)) {
+      explicitMethod = 'Débito';
+      cleanText = cleanText.replace(/\b(débito|debito)\b/gi, '');
+    }
+    else if (/\b(pix)\b/i.test(cleanText)) {
+      explicitMethod = 'Débito'; // Pix = Débito
+      cleanText = cleanText.replace(/\b(pix)\b/gi, '');
+    }
+
+    // E. Limpeza e Tokenização
     const tokens = cleanText.toLowerCase().replace(/[!?,;]/g, '').split(/\s+/).filter(t => t && !STOPWORDS.has(t));
 
-    // E. Reconstrói Descrição
+    // F. Reconstrói Descrição
     let description = tokens.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' ');
     if (!description) description = detectedType === 'income' ? 'Receita' : 'Nova Despesa';
 
-    // F. Inferência de Categoria
+    // G. Inferência de Categoria
     let category = 'Outros';
     const lowerDesc = description.toLowerCase();
 
@@ -208,6 +239,13 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
       return;
     }
 
+    // H. Define Método Final (STRICT MODE FOR PASTE)
+    // Se não for explicitamente Crédito/Débito/Pix e não for parcelado, 
+    // forçamos undefined para o usuário escolher.
+    let finalMethod: string | undefined = undefined;
+    if (explicitMethod) finalMethod = explicitMethod;
+    else if (isInstallment) finalMethod = 'Crédito';
+
     const transactionPreview: Partial<Transaction> = {
       amount,
       origin: description,
@@ -217,14 +255,15 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
       isInstallment,
       installmentsTotal: isInstallment ? installmentsTotal : undefined,
       currentInstallment: isInstallment ? 1 : undefined,
-      paymentMethod: isInstallment ? 'Crédito' : undefined,
+      paymentMethod: finalMethod,
       account: undefined
     };
 
     setPreview(transactionPreview);
 
-    if (isInstallment) setStep('account');
-    else setStep('method');
+    // I. Fluxo Inteligente
+    if (finalMethod && (isInstallment || explicitMethod)) setStep('account');
+    else setStep('method'); // Pergunta método se for ambíguo (paste sem info de pagamento)
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -284,6 +323,10 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
       setStep('input');
       setShowCategorySelector(false);
       setTimeout(() => inputRef.current?.focus(), 100);
+    } else if (!finalT.paymentMethod) {
+      // Feedback Visual se faltar método
+      setStep('method');
+      // Opcional: Adicionar lógica de shake ou alerta aqui
     }
   };
 
@@ -294,6 +337,19 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
         setStep(preview.isInstallment ? 'account' : 'method');
       }
     }
+  };
+
+  // --- HELPERS DA UI ---
+  const togglePaymentMethod = () => {
+    if (!preview) return;
+    const currentParam = preview.paymentMethod;
+
+    // Ciclo: Undefined -> Débito -> Crédito -> Débito
+    let newMethod = 'Débito';
+    if (currentParam === 'Débito') newMethod = 'Crédito';
+    else if (currentParam === 'Crédito') newMethod = 'Débito';
+
+    setPreview({ ...preview, paymentMethod: newMethod });
   };
 
   const renderSelectionArea = () => {
@@ -436,7 +492,34 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
               </div>
             </div>
 
-            <div className="relative self-start">
+            <div className="relative self-start flex gap-2">
+              {/* BUTTON: PAYMENT METHOD BADGE (NEW) */}
+              <button
+                type="button"
+                onClick={togglePaymentMethod}
+                className={`
+                      flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs transition-colors
+                      ${!preview.paymentMethod
+                    ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-700 animate-pulse'
+                    : preview.paymentMethod === 'Crédito'
+                      ? 'bg-orange-500/10 border-orange-500/20 text-orange-400 hover:bg-orange-500/20'
+                      : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                  }
+                  `}
+              >
+                {!preview.paymentMethod ? (
+                  <>
+                    <MousePointerClick className="w-3 h-3" />
+                    <span className="font-bold">Selecione...</span>
+                  </>
+                ) : (
+                  <>
+                    {preview.paymentMethod === 'Crédito' ? <CreditCard className="w-3 h-3" /> : <Wallet className="w-3 h-3" />}
+                    {preview.paymentMethod}
+                  </>
+                )}
+              </button>
+
               <button
                 onClick={() => setShowCategorySelector(!showCategorySelector)}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-800/50 text-zinc-300 text-xs hover:bg-zinc-700 transition-colors"

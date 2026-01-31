@@ -1,8 +1,16 @@
-import React, { useState, useMemo, useLayoutEffect, useRef } from 'react';
-import { FileSpreadsheet, MessageCircle, CheckSquare, Square, Trash2, Search, Filter, Tag, ChevronLeft, ChevronRight, Calendar, BarChart as BarChartIcon } from 'lucide-react';
+import React, { useState, useMemo, useLayoutEffect, useRef, useEffect } from 'react';
+import { FileSpreadsheet, MessageCircle, CheckSquare, Square, Trash2, Search, Filter, Tag, ChevronLeft, ChevronRight, Calendar, BarChart as BarChartIcon, Download, FileText, Layers } from 'lucide-react';
 import { BarChart, Bar, Cell, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
+import { Buffer } from 'buffer';
+
+// Polyfill for ExcelJS in browser
+if (typeof window !== 'undefined') {
+   window.Buffer = window.Buffer || Buffer;
+}
 import { Transaction, AppData } from '../types';
-import { getEffectiveAmount, getInstallmentValue, getEstimatedPaymentDate, formatCurrency } from '../utils'; // <--- Garanta que getEstimatedPaymentDate está importado
+import { getEffectiveAmount, getInstallmentValue, getEstimatedPaymentDate, formatCurrency, getAccountColor, getCategoryColor } from '../utils';
 import { TransactionRow } from '../components/TransactionRow';
 
 interface TransactionsViewProps {
@@ -29,9 +37,25 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
    const [showChart, setShowChart] = useState(true);
 
+   // Export Menu State
+   const [showExportMenu, setShowExportMenu] = useState(false);
+   const exportMenuRef = useRef<HTMLDivElement>(null);
+
    // Refs for Scrolling
    const monthsContainerRef = useRef<HTMLDivElement>(null);
    const hasInitialScrolled = useRef(false);
+
+   // Close Export Menu on Click Outside
+   useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+         if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+            setShowExportMenu(false);
+         }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+   }, []);
+
 
    // --- DATA PROCESSING ---
 
@@ -281,6 +305,56 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
    }, [data.transactions, currentDate, filterCategory, filterAccount, searchTerm, selectedTag]);
 
 
+   // --- GESTURES (Swipe Navigation) ---
+   const [touchStart, setTouchStart] = useState<number | null>(null);
+   const [touchEnd, setTouchEnd] = useState<number | null>(null);
+   const minSwipeDistance = 50;
+
+   const onTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
+      setTouchEnd(null);
+      if ('touches' in e) {
+         setTouchStart(e.targetTouches[0].clientX);
+      } else {
+         setTouchStart((e as React.MouseEvent).clientX);
+      }
+   };
+
+   const onTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
+      if ('touches' in e) {
+         setTouchEnd(e.targetTouches[0].clientX);
+      } else {
+         if (touchStart !== null) { // Only track mouse move if dragging
+            setTouchEnd((e as React.MouseEvent).clientX);
+         }
+      }
+   };
+
+   const onTouchEnd = () => {
+      if (!touchStart || !touchEnd) return;
+
+      const distance = touchStart - touchEnd;
+      const isLeftSwipe = distance > minSwipeDistance;
+      const isRightSwipe = distance < -minSwipeDistance;
+
+      if (isLeftSwipe) {
+         // Next Month (Swipe Left)
+         const next = new Date(currentDate);
+         next.setMonth(next.getMonth() + 1);
+         setCurrentDate(next);
+         monthsContainerRef.current?.scrollBy({ left: 100, behavior: 'smooth' });
+      }
+      if (isRightSwipe) {
+         // Prev Month (Swipe Right)
+         const prev = new Date(currentDate);
+         prev.setMonth(prev.getMonth() - 1);
+         setCurrentDate(prev);
+         monthsContainerRef.current?.scrollBy({ left: -100, behavior: 'smooth' });
+      }
+
+      setTouchStart(null);
+      setTouchEnd(null);
+   };
+
    // --- HANDLERS ---
    const toggleSelection = (id: string) => {
       setSelectedIds(prev => {
@@ -301,11 +375,250 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).format(date).toUpperCase();
    };
 
+   // --- RICH EXCEL EXPORT (MULTI-SHEET) ---
+   const handleExport = async (period: 'month' | 'year' | 'all') => {
+      try {
+         const workbook = new ExcelJS.Workbook();
+
+         // --- 1. DEFINE RANGE ---
+         let start: Date, end: Date;
+         if (period === 'month') {
+            start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+            end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+         } else if (period === 'year') {
+            start = new Date(currentDate.getFullYear(), 0, 1);
+            end = new Date(currentDate.getFullYear(), 11, 31);
+         } else {
+            start = new Date(2000, 0, 1);
+            end = new Date(2100, 11, 31);
+         }
+         start.setHours(0, 0, 0, 0);
+         end.setHours(23, 59, 59, 999);
+
+         // --- 2. DATA PROCESSING (EXPLODE & GROUP) ---
+         const itemsByMonth: Record<string, any[]> = {};
+         const summaryByMonth: Record<string, { income: number, expense: number, balance: number }> = {};
+         const allMonthsSet = new Set<string>();
+
+         // Helpers
+         const getBillingDate = (t: Transaction) => {
+            if (t.paymentMethod === 'Crédito') {
+               const settings = data.accountSettings.find(a => a.accountId === t.account);
+               if (settings) return getEstimatedPaymentDate(t.date, settings);
+            }
+            const d = new Date(t.date);
+            if (t.date.length === 10) d.setHours(12, 0, 0, 0);
+            return d;
+         };
+
+         const processItem = (t: Transaction, billingDate: Date, descriptionOverride?: string, amountOverride?: number) => {
+            if (billingDate < start || billingDate > end) return;
+
+            const monthKey = billingDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }); // "jan 2026"
+            const sortKey = `${billingDate.getFullYear()}-${String(billingDate.getMonth() + 1).padStart(2, '0')}`; // "2026-01"
+
+            // Composite key for sorting but display is monthKey
+            const groupKey = sortKey + "|" + monthKey;
+
+            if (!itemsByMonth[groupKey]) itemsByMonth[groupKey] = [];
+            allMonthsSet.add(groupKey);
+
+            const amt = amountOverride || getEffectiveAmount(t);
+
+            itemsByMonth[groupKey].push({
+               date: new Date(t.date).toLocaleDateString('pt-BR'), // Compra original
+               billingDateStr: billingDate.toLocaleDateString('pt-BR'), // Cobrança
+               category: t.category,
+               description: descriptionOverride || t.origin,
+               account: t.account,
+               amount: amt,
+               type: t.type === 'income' ? 'Entrada' : 'Saída',
+               billingEpoch: billingDate.getTime()
+            });
+         };
+
+         data.transactions.forEach(t => {
+            const baseBillingDate = getBillingDate(t);
+
+            if (!t.isInstallment || !t.installmentsTotal || t.installmentsTotal <= 1) {
+               processItem(t, baseBillingDate);
+            } else {
+               const val = getInstallmentValue(t);
+               for (let i = 0; i < t.installmentsTotal; i++) {
+                  const iterDate = new Date(baseBillingDate);
+                  iterDate.setMonth(baseBillingDate.getMonth() + i);
+                  processItem(t, iterDate, `${t.origin} (${i + 1}/${t.installmentsTotal})`, val);
+               }
+            }
+         });
+
+         // --- 3. EXCEL CONSTRUCTION ---
+         const sortedKeys = Array.from(allMonthsSet).sort();
+
+         // Helper to Create Styles
+         const applyHeaderStyle = (row: ExcelJS.Row) => {
+            row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27272A' } }; // Zinc-800
+            row.alignment = { vertical: 'middle', horizontal: 'center' };
+         };
+
+         const applyCurrency = (cell: ExcelJS.Cell, isIncome: boolean) => {
+            cell.numFmt = '"R$"#,##0.00;[Red]-"R$"#,##0.00';
+            cell.font = { color: { argb: isIncome ? 'FF10B981' : 'FFEF4444' }, bold: true };
+         };
+
+         // A. SUMMARY SHEET (If Multi-Month)
+         if (period !== 'month' && sortedKeys.length > 0) {
+            const summarySheet = workbook.addWorksheet('RESUMO GERAL', { pageSetup: { paperSize: 9 } });
+
+            summarySheet.mergeCells('A1:D1');
+            const title = summarySheet.getCell('A1');
+            title.value = `Resumo Financeiro - ${period === 'year' ? currentDate.getFullYear() : 'Geral'}`;
+            title.font = { size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+            title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF09090B' } };
+            title.alignment = { horizontal: 'center', vertical: 'middle' };
+            summarySheet.getRow(1).height = 35;
+
+            summarySheet.getRow(2).values = ['Mês / Ano', 'Total Entradas', 'Total Saídas', 'Saldo Líquido'];
+            applyHeaderStyle(summarySheet.getRow(2));
+            summarySheet.columns = [{ width: 20 }, { width: 20 }, { width: 20 }, { width: 20 }];
+
+            let grandTotalIncome = 0;
+            let grandTotalExpense = 0;
+
+            sortedKeys.forEach(key => {
+               const [_, label] = key.split('|');
+               const items = itemsByMonth[key];
+               const income = items.filter(i => i.type === 'Entrada').reduce((a, b) => a + b.amount, 0);
+               const expense = items.filter(i => i.type === 'Saída').reduce((a, b) => a + b.amount, 0); // expense is usually negative in storage but positive in 'amount' logic here? 
+               // Wait, getEffectiveAmount returns negative for expenses? 
+               // My processItem logic used getEffectiveAmount. Let's check `getEffectiveAmount`... 
+               // Usually it returns signed. But in the visualization I used Math.abs. 
+               // Let's assume getEffectiveAmount returns signed.
+
+               // Correction:
+               // In `processItem`: `const amt = amountOverride || getEffectiveAmount(t);`
+               // `getInstallmentValue` returns positive usually?
+               // `getEffectiveAmount` returns signed (- for expense).
+
+               // Let's normalize for the report:
+               // In the loop below, I'll use Math.abs because I split columns by type.
+
+               const rowIncome = items.reduce((acc, curr) => curr.type === 'Entrada' ? acc + Math.abs(curr.amount) : acc, 0);
+               const rowExpense = items.reduce((acc, curr) => curr.type === 'Saída' ? acc + Math.abs(curr.amount) : acc, 0);
+               const balance = rowIncome - rowExpense;
+
+               grandTotalIncome += rowIncome;
+               grandTotalExpense += rowExpense;
+
+               const r = summarySheet.addRow([label.toUpperCase(), rowIncome, rowExpense, balance]);
+               applyCurrency(r.getCell(2), true);
+               applyCurrency(r.getCell(3), false);
+               applyCurrency(r.getCell(4), balance >= 0);
+            });
+
+            // Grand Total Row
+            const totalRow = summarySheet.addRow(['TOTAL GERAL', grandTotalIncome, grandTotalExpense, grandTotalIncome - grandTotalExpense]);
+            totalRow.font = { bold: true };
+            totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFAFAFA' } };
+            applyCurrency(totalRow.getCell(2), true);
+            applyCurrency(totalRow.getCell(3), false);
+            applyCurrency(totalRow.getCell(4), (grandTotalIncome - grandTotalExpense) >= 0);
+         }
+
+         // B. MONTHLY SHEETS
+         sortedKeys.forEach(key => {
+            const [_, label] = key.split('|');
+            // Clean specific chars invalid for sheet names (though month names are usually safe)
+            const sheetName = label.toUpperCase().replace(/[\\\/?*\[\]]/g, '');
+
+            const sheet = workbook.addWorksheet(sheetName);
+            const items = itemsByMonth[key].sort((a, b) => a.billingEpoch - b.billingEpoch);
+
+            // Title
+            sheet.mergeCells('A1:F1');
+            const titleRow = sheet.getRow(1);
+            titleRow.getCell(1).value = `Extrato - ${label.toUpperCase()}`;
+            titleRow.font = { size: 14, bold: true };
+            titleRow.height = 30;
+            titleRow.alignment = { vertical: 'middle' };
+
+            // Headers
+            sheet.getRow(2).values = ['Data Compra', 'Data Cobrança', 'Categoria', 'Descrição', 'Conta', 'Valor'];
+            applyHeaderStyle(sheet.getRow(2));
+            sheet.columns = [
+               { key: 'date', width: 12 },
+               { key: 'billing', width: 12 },
+               { key: 'cat', width: 15 },
+               { key: 'desc', width: 35 },
+               { key: 'acc', width: 15 },
+               { key: 'val', width: 15 },
+            ];
+
+            // Rows
+            let mIncome = 0;
+            let mExpense = 0;
+
+            items.forEach((item, idx) => {
+               const val = item.amount; // Signed
+               if (item.type === 'Entrada') mIncome += val; else mExpense += val;
+
+               const r = sheet.addRow([
+                  item.date,
+                  item.billingDateStr,
+                  item.category,
+                  item.description,
+                  item.account,
+                  Math.abs(val) // Display absolute
+               ]);
+
+               // Stripe
+               if (idx % 2 !== 0) r.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F4F5' } };
+
+               // Color
+               const cVal = r.getCell(6);
+               cVal.numFmt = '"R$"#,##0.00';
+               cVal.font = { color: { argb: item.type === 'Entrada' ? 'FF10B981' : 'FFEF4444' }, bold: true };
+
+               // Center text
+               r.getCell(1).alignment = { horizontal: 'center' };
+               r.getCell(2).alignment = { horizontal: 'center' };
+               r.getCell(5).alignment = { horizontal: 'center' };
+            });
+
+            // Total
+            const tRow = sheet.addRow(['', '', '', 'TOTAL', '', mIncome + mExpense]); // mExpense is negative
+            tRow.font = { bold: true };
+            tRow.getCell(4).alignment = { horizontal: 'right' };
+            applyCurrency(tRow.getCell(6), (mIncome + mExpense) >= 0);
+         });
+
+         // --- 4. DOWNLOAD ---
+         const buf = await workbook.xlsx.writeBuffer();
+         const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+         saveAs(blob, `Relatorio_Financeiro_${period === 'month' ? currentDate.toLocaleDateString('pt-BR', { month: 'short' }) : period}.xlsx`);
+         setShowExportMenu(false);
+
+      } catch (error) {
+         console.error("Export failed:", error);
+         alert("Erro ao exportar: " + error);
+      }
+   };
+
    return (
       <div className="space-y-4 animate-in fade-in pb-24 relative">
 
-         {/* 1. Header: Month Navigation & Chart */}
-         <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-md pt-4 pb-2 border-b border-zinc-800 space-y-4">
+         {/* 1. Header: Month Navigation & Chart (Swipe Area) */}
+         <div
+            className="sticky top-0 z-30 bg-background/95 backdrop-blur-md pt-4 pb-2 border-b border-zinc-800 space-y-4 cursor-grab active:cursor-grabbing select-none"
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onMouseDown={onTouchStart}
+            onMouseMove={onTouchMove}
+            onMouseUp={onTouchEnd}
+            onMouseLeave={onTouchEnd}
+         >
 
             {/* Month Selector Carousel */}
             <div className="relative group">
@@ -397,9 +710,40 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         className="w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:border-primary transition-all shadow-inner"
                      />
                   </div>
+
                   <button onClick={() => setShowChart(!showChart)} className={`p-2.5 rounded-xl border transition-all ${showChart ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-zinc-900 text-zinc-500 border-zinc-800'}`}>
                      <BarChartIcon className="w-5 h-5 transform rotate-90" />
                   </button>
+               </div>
+
+               {/* NEW EXPORT BUTTON & MENU (POSITIONED BELOW SEARCH) */}
+               <div className="flex justify-between items-center -mt-1 px-1 relative z-50">
+                  <div className="relative" ref={exportMenuRef}>
+                     <button
+                        onClick={() => setShowExportMenu(!showExportMenu)}
+                        className="flex items-center gap-2 text-xs font-medium text-zinc-400 hover:text-emerald-400 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800/50"
+                     >
+                        <FileSpreadsheet className="w-4 h-4" />
+                        Exportar Relatório
+                     </button>
+
+                     {showExportMenu && (
+                        <div className="absolute top-full left-0 mt-2 w-48 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-top-2 overflow-hidden">
+                           <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-3 py-2 border-b border-zinc-800 mb-1">
+                              Selecionar Período
+                           </p>
+                           <button onClick={() => handleExport('month')} className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg flex items-center gap-2">
+                              <Calendar className="w-3.5 h-3.5 text-zinc-500" /> Mês Atual
+                           </button>
+                           <button onClick={() => handleExport('year')} className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg flex items-center gap-2">
+                              <Layers className="w-3.5 h-3.5 text-zinc-500" /> Ano Atual
+                           </button>
+                           <button onClick={() => handleExport('all')} className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg flex items-center gap-2">
+                              <FileText className="w-3.5 h-3.5 text-zinc-500" /> Todo o Período
+                           </button>
+                        </div>
+                     )}
+                  </div>
                </div>
 
                {/* Smart Tags Horizontal List */}
