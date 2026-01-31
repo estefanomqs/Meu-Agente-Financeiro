@@ -89,13 +89,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
    }, [currentDate, monthsList]);
 
    // --- HELPER DE DATA REAL (CORRIGIDO) ---
-   // Determina onde a transação deve aparecer no extrato
+   // Determina onde a transação deve aparecer no extrato (DATA CONTÁBIL / FATURA)
    const getDisplayDate = (t: Transaction): Date => {
-      // 1. Débito, Pix, Dinheiro -> Data Original da Compra
+      // 1. Débito, Pix, Dinheiro -> Data Original
       if (t.paymentMethod !== 'Crédito') {
          const d = new Date(t.date);
-         // Ajuste de fuso para garantir que '2023-11-01' não vire '2023-10-31'
-         if (t.date.length === 10) d.setHours(12, 0, 0, 0);
+         if (t.date.length === 10) d.setHours(12, 0, 0, 0); // Ajuste de fuso
          return d;
       }
 
@@ -105,7 +104,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
          return getEstimatedPaymentDate(t.date, settings);
       }
 
-      // Fallback se não achar config
+      // Fallback
       const d = new Date(t.date);
       if (t.date.length === 10) d.setHours(12, 0, 0, 0);
       return d;
@@ -166,7 +165,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
    // 4. Transações do Mês Selecionado (Listing)
    const { groupedTransactions, summary } = useMemo(() => {
-      // Intervalo do Mês Selecionado (Start 00:00 -> End 23:59)
+      // Intervalo do Mês Selecionado (Baseado na Competência/Fatura)
       const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       start.setHours(0, 0, 0, 0);
 
@@ -175,6 +174,26 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
       let rawList: { t: Transaction, isGhost: boolean, ghostIndex?: number, overrideAmount?: number, sortDate: number, displayDate: number }[] = [];
       const searchLower = searchTerm.toLowerCase();
+
+      // Helper: Data Original da Compra (Fixa visualmente)
+      // Ajustamos para meio-dia para evitar shifts de UTC na exibição
+      const getOriginalDate = (t: Transaction): Date => {
+         const d = new Date(t.date);
+         if (t.date.length === 10) d.setHours(12, 0, 0, 0);
+         return d;
+      };
+
+      // Helper: Data de Cobrança (Filtro)
+      // Se for Crédito -> Fatura. Se for Débito -> Compra.
+      const getBillingDate = (t: Transaction): Date => {
+         if (t.paymentMethod === 'Crédito') {
+            const settings = data.accountSettings.find(a => a.accountId === t.account);
+            if (settings) {
+               return getEstimatedPaymentDate(t.date, settings);
+            }
+         }
+         return getOriginalDate(t);
+      };
 
       data.transactions.forEach(t => {
          // --- Filters Clean ---
@@ -189,46 +208,49 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
          if (filterCategory !== 'Todas' && t.category !== filterCategory) return;
          if (filterAccount !== 'Todos' && t.account !== filterAccount) return;
 
-         // --- DATA & PARCELAMENTO ---
+         // --- DATA PROCESSING ---
+         const originalDate = getOriginalDate(t);    // Data Visual (Sempre a da compra)
+         const baseBillingDate = getBillingDate(t);  // Data Contábil Base
+
          if (!t.isInstallment || !t.installmentsTotal || t.installmentsTotal <= 1) {
             // Pagamento Único
-            const displayDate = getDisplayDate(t);
-
-            // FILTRO RIGOROSO: Só mostra se cair no mês
-            if (displayDate >= start && displayDate <= end) {
+            // Filtra pela Data de Cobrança (Fatura)
+            if (baseBillingDate >= start && baseBillingDate <= end) {
                rawList.push({
                   t,
                   isGhost: false,
-                  sortDate: displayDate.getTime(),
-                  displayDate: displayDate.getTime()
+                  sortDate: originalDate.getTime(), // Agrupa pela data da compra
+                  displayDate: originalDate.getTime()
                });
             }
          } else {
-            // Recorrência / Parcelado
-            const initialDate = getDisplayDate(t);
+            // Parcelado
             const val = getInstallmentValue(t);
 
             for (let i = 0; i < t.installmentsTotal; i++) {
-               // Projeta a parcela i meses à frente
-               const parcelDate = new Date(initialDate);
-               parcelDate.setMonth(initialDate.getMonth() + i);
+               // Projeta a COBRANÇA para o mês 'i'
+               const currentBillingDate = new Date(baseBillingDate);
+               currentBillingDate.setMonth(baseBillingDate.getMonth() + i);
 
-               // FILTRO RIGOROSO: Só mostra se essa parcela específica cair no mês
-               if (parcelDate >= start && parcelDate <= end) {
+               // Filtra: Essa parcela cai na fatura deste mês selecionado?
+               if (currentBillingDate >= start && currentBillingDate <= end) {
+                  // Se sim, mostramos!
+                  // Nota: A data visual (sortDate) continua sendo a ORIGINAL da compra.
+                  // Isso imita um extrato de cartão: "Compra em 30/Jan - Parcela 2/10"
                   rawList.push({
                      t,
-                     isGhost: i > 0, // A partir da 2ª é fantasma (futura)
+                     isGhost: i > 0,
                      ghostIndex: i + 1,
                      overrideAmount: val,
-                     sortDate: parcelDate.getTime(),
-                     displayDate: parcelDate.getTime()
+                     sortDate: originalDate.getTime(), // <--- Mágica: Agrupa no dia da compra
+                     displayDate: originalDate.getTime()
                   });
                }
             }
          }
       });
 
-      // Ordenar: Mais recentes primeiro
+      // Ordenar: Mais recentes primeiro (baseado na data de compra)
       rawList.sort((a, b) => b.sortDate - a.sortDate);
 
       // Agrupar
@@ -237,7 +259,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       let totalExpense = 0;
 
       rawList.forEach(item => {
-         const dateKey = new Date(item.sortDate).toISOString().split('T')[0];
+         // Correção de Timezone no Agrupamento
+         // Usa a data local 'pt-BR' para gerar a chave 'YYYY-MM-DD'
+         const dateObj = new Date(item.sortDate);
+         const dateKey = dateObj.toLocaleDateString('pt-BR').split('/').reverse().join('-');
+
          if (!groups[dateKey]) groups[dateKey] = [];
          groups[dateKey].push(item);
 
@@ -272,7 +298,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
    const formatDateHeader = (dateString: string) => {
       const date = new Date(dateString + 'T12:00:00');
-      return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' }).format(date).toUpperCase();
+      return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).format(date).toUpperCase();
    };
 
    return (

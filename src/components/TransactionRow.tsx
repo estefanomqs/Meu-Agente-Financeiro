@@ -37,7 +37,7 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
   const currentInstallmentIdx = isGhost ? ghostIndex : (isBillView ? 1 : null);
 
   let rowStyle = 'hover:bg-zinc-800/30 hover:border-zinc-800/50';
-  if (isGhost) rowStyle = 'bg-zinc-900/50 border-dashed border-zinc-800 hover:border-zinc-700 opacity-80';
+  if (isGhost) rowStyle = 'bg-zinc-900/30 border-dashed border-zinc-800 hover:border-zinc-700 opacity-60'; // Mais sutil
   if (isSubscription) rowStyle = 'bg-purple-500/5 border-dashed border-purple-500/20 hover:bg-purple-500/10';
   if (isSelected) rowStyle = 'bg-primary/5 border-primary/30';
 
@@ -61,7 +61,6 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
         <div>
           <p className="font-medium text-white line-clamp-1 flex items-center gap-2">
             {t.origin}
-            {isGhost && !isSubscription && <span className="text-[10px] uppercase tracking-wider text-orange-400 bg-orange-400/10 px-1.5 py-0.5 rounded">Provisionado</span>}
             {isSubscription && <span className="text-[10px] uppercase tracking-wider text-purple-400 bg-purple-400/10 px-1.5 py-0.5 rounded">Assinatura</span>}
           </p>
           <div className="flex flex-wrap gap-2 text-xs text-zinc-500 mt-1">

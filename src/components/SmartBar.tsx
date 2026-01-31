@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowRight, Tag, Sparkles, DollarSign, Plus, Users, TrendingUp, ChevronDown, Layers, CreditCard, Wallet } from 'lucide-react';
+import { ArrowRight, Tag, Sparkles, DollarSign, Plus, Users, TrendingUp, ChevronDown, Layers, CreditCard, Wallet, Calendar } from 'lucide-react';
 import { Transaction } from '../types';
 import { CATEGORIES, inferCategory } from '../utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -66,7 +66,7 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
     let cleanText = text;
     let detectedType: 'income' | 'expense' = 'expense';
     let amount: number | undefined = undefined;
-    let date = new Date();
+    let date = new Date(); // Será sobrescrito se acharmos data
     let isInstallment = false;
     let installmentsTotal = 2;
 
@@ -75,6 +75,79 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
       detectedType = 'income';
       cleanText = cleanText.replace(/\b(recebi|ganhei|entrada|salário|pago por|pix recebido)\b/gi, '');
     }
+
+    // --- DATE DETECTION ---
+    const today = new Date();
+    today.setHours(12, 0, 0, 0); // Base para hoje meio-dia
+    date = new Date(today); // Default: Hoje
+
+    // Helper: De Volta para o Passado (Se futuro -> Ano anterior)
+    const adjustDateIfFuture = (d: Date): Date => {
+      const threshold = new Date(today);
+      threshold.setDate(threshold.getDate() + 1); // Margem de segurança de 1 dia
+
+      if (d > threshold) {
+        d.setFullYear(d.getFullYear() - 1);
+      }
+      return d;
+    };
+
+    // 1. Ontem
+    if (/\bontem\b/i.test(cleanText)) {
+      date.setDate(date.getDate() - 1);
+      cleanText = cleanText.replace(/\bontem\b/i, '');
+    }
+    else {
+      let parsedDate: Date | null = null;
+
+      // 2. Numérica (28/01, 28/01/2025)
+      const numMatch = cleanText.match(/(?:dia\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i);
+      if (numMatch) {
+        const d = parseInt(numMatch[1]);
+        const m = parseInt(numMatch[2]) - 1;
+        const y = numMatch[3] ? parseInt(numMatch[3]) : today.getFullYear();
+
+        parsedDate = new Date(y, m, d, 12, 0, 0);
+
+        if (!numMatch[3]) {
+          parsedDate = adjustDateIfFuture(parsedDate);
+        }
+        cleanText = cleanText.replace(numMatch[0], '');
+      }
+      else {
+        // 3. Extenso (28 de janeiro, 28 jan)
+        const monthMap: Record<string, number> = {
+          'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
+          'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
+        };
+        const extMatch = cleanText.match(/(?:dia\s+)?(\d{1,2})\s+(?:de\s+)?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*/i);
+
+        if (extMatch) {
+          const d = parseInt(extMatch[1]);
+          const mStr = extMatch[2].toLowerCase();
+          const m = monthMap[mStr];
+
+          parsedDate = new Date(today.getFullYear(), m, d, 12, 0, 0);
+          parsedDate = adjustDateIfFuture(parsedDate);
+
+          cleanText = cleanText.replace(extMatch[0], '');
+        }
+        else {
+          // 4. Simples (Dia 15)
+          const simpleMatch = cleanText.match(/\bdia\s+(\d{1,2})\b/i);
+          if (simpleMatch) {
+            const d = parseInt(simpleMatch[1]);
+            parsedDate = new Date(today.getFullYear(), today.getMonth(), d, 12, 0, 0);
+            parsedDate = adjustDateIfFuture(parsedDate);
+
+            cleanText = cleanText.replace(simpleMatch[0], '');
+          }
+        }
+      }
+
+      if (parsedDate) date = parsedDate;
+    }
+
 
     // B. NOVA REGRA: Detectar Multiplicação ("12x 500", "12 parcelas de 500")
     // Essa regra roda ANTES da detecção de valor simples para evitar que o "12" seja pego como valor.
@@ -167,17 +240,26 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
     setStep('account');
   };
 
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!preview) return;
+    // Pega a data do input (YYYY-MM-DD) e ajusta para 12:00
+    const [y, m, d] = e.target.value.split('-').map(Number);
+    const newDate = new Date(y, m - 1, d, 12, 0, 0);
+
+    setPreview({ ...preview, date: newDate.toISOString() });
+  };
+
   const handleSelectAccount = (accountName: string) => {
     if (!preview || !preview.paymentMethod) return;
 
-    // Mantém a data de hoje (Compra). 
-    // O TransactionsView cuidará de jogar para Fev/Mar baseado no fechamento.
-    const finalDate = new Date();
+    // Se estivermos editando a data manualmente, respeitamos o preview.date
+    // Caso contrário, usamos a lógica interna ou hoje
+    const finalDateStr = preview.date || new Date().toISOString();
 
     const finalTransaction = {
       ...preview,
       account: accountName,
-      date: finalDate.toISOString()
+      date: finalDateStr
     };
 
     submitTransaction(finalTransaction);
@@ -325,15 +407,36 @@ export const SmartBar: React.FC<SmartBarProps> = ({ onAdd, onOpenManual, history
               <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
                 Lançamento detectado
               </span>
-              <div className="flex items-center gap-3">
-                <span className={`font-bold text-xl tracking-tight ${preview.type === 'income' ? 'text-secondary' : 'text-danger'}`}>
-                  {preview.type === 'income' ? '+' : '-'}{preview.amount?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                </span>
-                <span className="font-medium text-white text-lg">{preview.origin}</span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-3">
+                  <span className={`font-bold text-xl tracking-tight ${preview.type === 'income' ? 'text-secondary' : 'text-danger'}`}>
+                    {preview.type === 'income' ? '+' : '-'}{preview.amount?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  <span className="font-medium text-white text-lg">{preview.origin}</span>
+                </div>
+
+                {/* DATE SELECTOR (NEW) */}
+                <div className="relative flex items-center gap-2 group cursor-pointer w-fit">
+                  <Calendar className="w-3.5 h-3.5 text-zinc-500 group-hover:text-primary transition-colors" />
+                  <span className="text-xs text-zinc-400 group-hover:text-white transition-colors">
+                    {preview.date
+                      ? new Date(preview.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+                      : 'Hoje'
+                    }
+                  </span>
+                  {/* Invisible Input Overlay */}
+                  <input
+                    type="date"
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    onChange={handleDateChange}
+                    // Value precisa estar em YYYY-MM-DD
+                    value={preview.date ? new Date(preview.date).toISOString().split('T')[0] : ''}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="relative">
+            <div className="relative self-start">
               <button
                 onClick={() => setShowCategorySelector(!showCategorySelector)}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-800/50 text-zinc-300 text-xs hover:bg-zinc-700 transition-colors"
