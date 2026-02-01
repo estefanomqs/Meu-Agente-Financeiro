@@ -11,7 +11,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { GlobalModals } from './components/managers/GlobalModals';
 
 // Import Views
-import { DashboardView } from './views/DashboardView';
+import { DashboardView } from './views/dashboard/DashboardView';
 import { TransactionsView } from './views/TransactionsView';
 import { CalendarView } from './views/CalendarView';
 import { GoalsView } from './views/GoalsView';
