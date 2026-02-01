@@ -86,6 +86,14 @@ export const useFinanceStore = () => {
     }));
   }, []);
 
+  const deleteTransactions = useCallback(async (ids: string[]) => {
+    const idsSet = new Set(ids);
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.filter(t => !idsSet.has(t.id))
+    }));
+  }, []);
+
   const addSubscription = useCallback(async (sub: Omit<Subscription, 'id'>) => {
     const newSub: Subscription = { id: generateId(), ...sub };
     setData(prev => ({ ...prev, subscriptions: [...prev.subscriptions, newSub] }));
@@ -232,6 +240,7 @@ export const useFinanceStore = () => {
     addTransaction,
     editTransaction,
     deleteTransaction,
+    deleteTransactions,
     addSubscription,
     addGoal,
     updateGoal,

@@ -41,7 +41,7 @@ export default function App() {
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
   const {
-    data, addTransaction, editTransaction: updateTransaction, deleteTransaction,
+    data, addTransaction, editTransaction: updateTransaction, deleteTransaction, deleteTransactions,
     addGoal, addFundsToGoal, updateAccountSettings, deleteAccountSettings, setBudget, deleteBudget,
     completeOnboarding, privacyMode, togglePrivacy, importData, exportData
   } = useFinanceStore();
@@ -232,7 +232,7 @@ export default function App() {
         {/* Roteamento de Views */}
         <div className="mt-6">
           {view === 'dashboard' && <DashboardView data={data} privacyMode={privacyMode} onEditTransaction={(t) => { setEditingTransaction(t); setIsModalOpen(true); }} onDeleteTransaction={setDeleteId} setView={setView} onOpenImport={() => setIsImportWizardOpen(true)} userName={data.userProfile.name} />}
-          {view === 'transactions' && <TransactionsView data={data} privacyMode={privacyMode} onEditTransaction={(t) => { setEditingTransaction(t); setIsModalOpen(true); }} onDeleteTransaction={setDeleteId} onExportCSV={() => { }} onWhatsApp={() => { }} onBulkDelete={() => { }} />}
+          {view === 'transactions' && <TransactionsView data={data} privacyMode={privacyMode} onEditTransaction={(t) => { setEditingTransaction(t); setIsModalOpen(true); }} onDeleteTransaction={setDeleteId} onExportCSV={() => { }} onWhatsApp={() => { }} onBulkDelete={(ids) => { deleteTransactions(Array.from(ids)); setToast(`${ids.size} itens excluídos`); setTimeout(() => setToast(null), 3000); }} />}
           {view === 'calendar' && <CalendarView data={data} privacyMode={privacyMode} onEditTransaction={(t) => { setEditingTransaction(t); setIsModalOpen(true); }} onDeleteTransaction={setDeleteId} />}
           {view === 'goals' && <GoalsView data={data} privacyMode={privacyMode} onAddGoal={() => setIsGoalModalOpen(true)} onDeposit={setDepositGoalId} />}
           {view === 'budgets' && <BudgetsView data={data} privacyMode={privacyMode} onSetBudget={setBudget} onDeleteBudget={deleteBudget} />}

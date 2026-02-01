@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2 } from 'lucide-react';
+import { ConfirmationModal } from '../../components/ConfirmationModal';
 import { AppData, Transaction } from '../../types';
 import { useFinanceStore } from '../../hooks/useFinanceStore';
 import { AccountSettingsModal } from '../../components/AccountSettingsModal';
@@ -146,6 +147,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             .catch(err => alert("Erro ao exportar: " + err));
     };
 
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    // Helpers to get all *visible* valid IDs
+    const getAllVisibleIds = () => {
+        const allIds = new Set<string>();
+        groupedTransactions.forEach(([_, items]) => {
+            items.forEach(item => {
+                if (item.t && item.t.id) {
+                    allIds.add(item.t.id);
+                }
+            });
+        });
+        return allIds;
+    };
+
     const toggleSelection = (id: string) => {
         setSelectedIds(prev => {
             const newSet = new Set(prev);
@@ -154,10 +170,34 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         });
     };
 
+    const allVisibleIds = getAllVisibleIds();
+    const isAllSelected = allVisibleIds.size > 0 && selectedIds.size === allVisibleIds.size;
+
+    const handleToggleSelectAll = () => {
+        if (isAllSelected) {
+            setSelectedIds(new Set()); // Deselect All
+        } else {
+            setSelectedIds(allVisibleIds); // Select All
+        }
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedIds.size === 0) return;
+        setShowDeleteConfirm(true);
+    };
+
+    const confirmDelete = () => {
+        onBulkDelete(selectedIds);
+        setSelectedIds(new Set());
+        setShowDeleteConfirm(false);
+    };
+
     return (
         <div className="min-h-screen bg-background pb-24 relative">
 
-            {/* 1. HEADER DE COMANDO (Premium Sticky) */}
+            {/* ... other components ... */}
+
+            {/* 1. HEADER DE COMANDO */}
             <div className={`sticky top-0 z-40 w-full backdrop-blur-xl border-b transition-all duration-300 ease-in-out shadow-black/20 overflow-hidden
             ${isScrolled
                     ? 'bg-zinc-950/95 border-zinc-700/50 shadow-xl'
@@ -242,9 +282,15 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             {/* Bulk Actions */}
             {selectedIds.size > 0 && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] bg-surfaceHighlight border border-zinc-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 animate-in slide-in-from-bottom-10 fade-in">
-                    <span className="text-sm font-medium text-white">{selectedIds.size} selecionados</span>
-                    <button onClick={() => setSelectedIds(new Set())} className="text-xs text-zinc-400 hover:text-white">Cancelar</button>
-                    <button onClick={() => onBulkDelete(selectedIds)} className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-red-600 transition-colors">
+                    <span className="text-sm font-medium text-white min-w-[3ch] text-center">{selectedIds.size}</span>
+                    <button onClick={handleToggleSelectAll} className="text-xs text-zinc-300 hover:text-white font-medium min-w-[100px] transition-colors">
+                        {isAllSelected ? 'Deselecionar Todos' : 'Selecionar Todos'}
+                    </button>
+                    <div className="w-px h-4 bg-zinc-700 mx-1"></div>
+                    <button onClick={() => setSelectedIds(new Set())} className="text-xs text-zinc-400 hover:text-white">
+                        Cancelar
+                    </button>
+                    <button onClick={handleBulkDelete} className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20">
                         <Trash2 className="w-3 h-3" /> Excluir
                     </button>
                 </div>
@@ -258,6 +304,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     onSave={updateAccountSettings || (() => console.warn('updateAccountSettings not available'))}
                 />
             )}
+
+            <ConfirmationModal
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={confirmDelete}
+                title={`Excluir ${selectedIds.size} itens?`}
+                message="Essa ação removerá permanentemente os lançamentos selecionados. Lançamentos parcelados futuros também serão removidos se você selecionou o registro original."
+                confirmText="Excluir"
+                isDestructive
+            />
         </div>
     );
 };
