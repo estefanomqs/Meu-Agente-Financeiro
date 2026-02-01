@@ -36,18 +36,9 @@ export const BillingCycleSlider: React.FC<Props> = ({ closingDay, dueDay, onUpda
         const newDay = getDayFromX(e.clientX);
 
         if (isDragging === 'closing') {
-            // Constraint: closing <= due
-            if (newDay <= dueDay) {
-                onUpdate('closing', newDay);
-            } else {
-                // Optional: Push due day if we want "push" behavior, but for now stick to hard limit
-                // onUpdate('closing', dueDay); 
-            }
+            onUpdate('closing', newDay);
         } else {
-            // Constraint: due >= closing
-            if (newDay >= closingDay) {
-                onUpdate('due', newDay);
-            }
+            onUpdate('due', newDay);
         }
     };
 
@@ -66,9 +57,9 @@ export const BillingCycleSlider: React.FC<Props> = ({ closingDay, dueDay, onUpda
         const distToDue = Math.abs(clickedDay - dueDay);
 
         if (distToClosing < distToDue) {
-            if (clickedDay <= dueDay) onUpdate('closing', clickedDay);
+            onUpdate('closing', clickedDay);
         } else {
-            if (clickedDay >= closingDay) onUpdate('due', clickedDay);
+            onUpdate('due', clickedDay);
         }
     };
 
@@ -99,10 +90,27 @@ export const BillingCycleSlider: React.FC<Props> = ({ closingDay, dueDay, onUpda
                 <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-full"></div>
 
                 {/* Active Range Bar */}
-                <div
-                    className="absolute top-0 bottom-0 bg-gradient-to-r from-red-500/30 to-emerald-500/30 rounded-full pointer-events-none"
-                    style={{ left: `${closingPos}%`, width: `${duePos - closingPos}%` }}
-                ></div>
+                {closingPos < duePos ? (
+                    // Normal Case: Closing < Due
+                    <div
+                        className="absolute top-0 bottom-0 bg-gradient-to-r from-red-500/30 to-emerald-500/30 rounded-full pointer-events-none"
+                        style={{ left: `${closingPos}%`, width: `${duePos - closingPos}%` }}
+                    />
+                ) : (
+                    // Inverted Case: Closing > Due (Next Month)
+                    <>
+                        {/* Closing -> End */}
+                        <div
+                            className="absolute top-0 bottom-0 bg-red-500/30 rounded-l-full pointer-events-none"
+                            style={{ left: `${closingPos}%`, right: 0 }}
+                        />
+                        {/* Start -> Due */}
+                        <div
+                            className="absolute top-0 bottom-0 bg-emerald-500/30 rounded-r-full pointer-events-none"
+                            style={{ left: 0, width: `${duePos}%` }}
+                        />
+                    </>
+                )}
             </div>
 
             {/* Closing Handle (Red) */}

@@ -29,13 +29,14 @@ interface TransactionsViewProps {
     onExportCSV: (items: any[]) => void;
     onWhatsApp: (items: any[], start: string, end: string) => void;
     onBulkDelete: (ids: Set<string>) => void;
+    onOpenCardSettings: () => void;
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
-    data, privacyMode, onEditTransaction, onDeleteTransaction, onExportCSV, onWhatsApp, onBulkDelete
+    data, privacyMode, onEditTransaction, onDeleteTransaction, onExportCSV, onWhatsApp, onBulkDelete, onOpenCardSettings
 }) => {
-    const { updateAccountSettings } = useFinanceStore();
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    // const { updateAccountSettings } = useFinanceStore(); // Removed local requirement if not used directly
+    // const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Removed local state
 
     // State Principal
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -252,7 +253,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             {/* 2. MEUS CARTÕES (Carousel) */}
             <CreditCardCarousel
                 accountSettings={data.accountSettings}
-                onOpenSettings={() => setIsSettingsOpen(true)}
+                transactions={data.transactions}
+                currentDate={currentDate}
+                onOpenSettings={onOpenCardSettings}
             />
 
             {/* 3. LISTA DE TRANSAÇÕES */}
@@ -296,14 +299,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 </div>
             )}
 
-            {isSettingsOpen && AccountSettingsModal && (
-                <AccountSettingsModal
-                    isOpen={isSettingsOpen}
-                    onClose={() => setIsSettingsOpen(false)}
-                    currentSettings={data.accountSettings || []}
-                    onSave={updateAccountSettings || (() => console.warn('updateAccountSettings not available'))}
-                />
-            )}
+
 
             <ConfirmationModal
                 isOpen={showDeleteConfirm}

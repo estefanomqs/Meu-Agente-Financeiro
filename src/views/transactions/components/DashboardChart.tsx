@@ -13,7 +13,7 @@ export const DashboardChart: React.FC<DashboardChartProps> = ({ chartData, showC
             <div className={`${isScrolled ? 'h-24' : 'h-32'} w-full mt-2 px-2 transition-all duration-300`}>
                 <div className="w-full h-full outline-none focus:outline-none ring-0 [&_.recharts-surface]:outline-none" tabIndex={-1}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData} margin={{ top: isScrolled ? 5 : 20, right: 5, left: -20, bottom: 0 }} barCategoryGap="30%">
+                        <BarChart data={chartData} margin={{ top: isScrolled ? 5 : 20, right: 5, left: -20, bottom: 0 }} barCategoryGap="10%">
                             <XAxis
                                 dataKey="name"
                                 hide={isScrolled}

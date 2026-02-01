@@ -91,10 +91,10 @@ export const AccountSettingsModal: React.FC<Props> = ({ isOpen, onClose, current
 
       if (field === 'closing') {
         const next = newClosing + delta;
-        if (next >= 1 && next <= newDue) newClosing = next;
+        if (next >= 1 && next <= 31) newClosing = next;
       } else {
         const next = newDue + delta;
-        if (next >= newClosing && next <= 31) newDue = next;
+        if (next >= 1 && next <= 31) newDue = next;
       }
 
       return { ...prev, [selectedAccount]: { closing: newClosing, due: newDue } };
@@ -340,7 +340,7 @@ export const AccountSettingsModal: React.FC<Props> = ({ isOpen, onClose, current
                 </span>
                 <button
                   onClick={() => updateConfig('closing', 1)}
-                  disabled={closingDay >= dueDay}
+                  disabled={closingDay >= 31}
                   className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 active:scale-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-4 h-4" />
@@ -356,7 +356,7 @@ export const AccountSettingsModal: React.FC<Props> = ({ isOpen, onClose, current
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => updateConfig('due', -1)}
-                  disabled={dueDay <= closingDay}
+                  disabled={dueDay <= 1}
                   className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 active:scale-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Minus className="w-4 h-4" />
@@ -395,10 +395,8 @@ export const AccountSettingsModal: React.FC<Props> = ({ isOpen, onClose, current
 
                   if (field === 'closing') {
                     newClosing = val;
-                    if (newClosing > newDue) newClosing = newDue; // Clamp
                   } else {
                     newDue = val;
-                    if (newDue < newClosing) newDue = newClosing; // Clamp
                   }
                   return { ...prev, [selectedAccount]: { closing: newClosing, due: newDue } };
                 });

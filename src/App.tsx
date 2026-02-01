@@ -12,7 +12,7 @@ import { GlobalModals } from './components/managers/GlobalModals';
 
 // Import Views
 import { DashboardView } from './views/dashboard/DashboardView';
-import { TransactionsView } from './views/TransactionsView';
+import { TransactionsView } from './views/transactions/TransactionsView';
 import { CalendarView } from './views/CalendarView';
 import { GoalsView } from './views/GoalsView';
 import { BudgetsView } from './views/BudgetsView';
@@ -118,6 +118,7 @@ export default function App() {
             onExportCSV={() => { }}
             onWhatsApp={() => { }}
             onBulkDelete={(ids) => { deleteTransactions(Array.from(ids)); showToast(`${ids.size} itens excluídos`); }}
+            onOpenCardSettings={() => setShowCardSettings(true)}
           />
         )}
         {view === 'calendar' && (
